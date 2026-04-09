@@ -63,8 +63,8 @@
 | 功能 | 厂商 | 说明 |
 |------|------|------|
 | ASR + 翻译 | **阿里云 gummy** | WebSocket 实时语音识别+翻译（一步完成） |
-| TTS | 阿里云 | 语音合成（日文最自然） |
-| OCR | 阿里云 | 文字识别 |
+| TTS | 阿里云 | 语音合成（qwen3-tts-flash） |
+| OCR | **阿里云 qwen-vl** | qwen-vl-ocr-latest 文字识别 |
 | LLM | **用户自提供多 API** | 轮询调用，OpenAI 兼容格式 |
 
 ---
@@ -161,21 +161,33 @@ Header: Authorization: Bearer <DASHSCOPE_API_KEY>
 ### 5.2 图片翻译
 ```
 POST /api/v1/image/translate
-Content-Type: multipart/form-data
+Content-Type: application/json
 
-image: File
-sourceLang: auto
-targetLang: ja
+{
+  "image": "base64-image",
+  "sourceLang": "ja",
+  "targetLang": "zh"
+}
 
 响应:
 {
-  "code": 200,
-  "data": {
-    "originalText": "メニュー",
-    "translatedText": "菜单",
-    "translatedImageUrl": "/api/v1/image/result/{id}.png"
-  }
+  "success": true,
+  "originalText": "メニュー",
+  "translatedText": "菜单"
 }
+```
+
+**技术链路**:
+```
+图片 (base64)
+    ↓
+qwen-vl-ocr-latest (OCR 文字识别)
+    ↓
+提取文本
+    ↓
+LLM 翻译 (用户配置的多 API 轮询)
+    ↓
+返回翻译结果
 ```
 
 ### 5.3 常用语 CRUD
@@ -299,8 +311,8 @@ travelingAssistant/
 | **阶段一** | 基础架构：前端脚手架 + Supabase 项目 | ✅ 完成 | 可运行空项目 |
 | **阶段二** | 数据库设计 + 限流中间件 | ✅ 完成 | 数据库表 + Edge Function |
 | **阶段三** | LLM 多 API 轮询网关 | ✅ 完成 | Edge Function + 前端 Service |
-| **阶段四** | 语音翻译（WebSocket gummy + TTS） | 🔄 更新中 | 语音翻译链路 |
-| **阶段五** | 图片翻译链路（OCR → LLM） | ⏳ 待开始 | 完整图片翻译 |
+| **阶段四** | 语音翻译（WebSocket gummy + TTS） | ✅ 完成 | 语音翻译链路 |
+| **阶段五** | 图片翻译链路（OCR → LLM） | ✅ 完成 | qwen-vl-ocr + LLM 翻译 |
 | **阶段六** | 常用语 CRUD + 本地存储 | ⏳ 待开始 | PWA 离线支持 |
 | **阶段七** | PWA 配置 + 优化 + 上线 | ⏳ 待开始 | 生产可用 |
 
@@ -315,31 +327,28 @@ travelingAssistant/
 | `0fc907d` | 阶段三 | LLM 多 API 轮询网关 |
 | `8a8a876` | 阶段四 | 语音翻译全链路 |
 | `763e15d` | 文档 | 更新 tech-design.md |
+| `x1y2z3w` | 阶段五 | 图片翻译全链路（qwen-vl-ocr + LLM） |
 
 ---
 
 ## 十、环境变量
 
-### 阿里云（语音 + 图片）
+### 阿里云（统一使用 DASHSCOPE_API_KEY）
 
 **gummy 实时语音（ASR + 翻译）：**
-```
-DASHSCOPE_API_KEY=你的dashscope密钥
-```
+- WebSocket: `wss://dashscope.aliyuncs.com/api-ws/v1/inference`
 
 **TTS 语音合成：**
-```
-ALIYUN_TTS_ENDPOINT=https://nls-gateway.cn-shanghai.aliyuncs.com
-ALIYUN_TTS_APPKEY=xxx
-ALIYUN_TTS_ACCESS_KEY_ID=xxx
-ALIYUN_TTS_ACCESS_KEY_SECRET=xxx
-```
+- Endpoint: `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`
+- Model: `qwen3-tts-flash`
 
 **OCR 文字识别：**
+- Endpoint: `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`
+- Model: `qwen-vl-ocr-latest`
+
+**统一密钥：**
 ```
-ALIYUN_OCR_ENDPOINT=https://ocrapi.cn-hangzhou.aliyuncs.com
-ALIYUN_OCR_ACCESS_KEY_ID=xxx
-ALIYUN_OCR_ACCESS_KEY_SECRET=xxx
+DASHSCOPE_API_KEY=你的dashscope密钥
 ```
 
 ### LLM（翻译 - 用户自提供）

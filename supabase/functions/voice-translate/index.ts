@@ -1,148 +1,236 @@
-// Supabase Edge Function: voice-translate
-// Voice translation: ASR → LLM → TTS
+// Voice Translation using Aliyun gummy WebSocket + TTS
+// ASR + Translation in one step via WebSocket, then TTS
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+const DASHSCOPE_API_KEY = Deno.env.get('DASHSCOPE_API_KEY')!
+const TTS_ENDPOINT = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation'
+const WS_ENDPOINT = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference'
 
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
-const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_KEY')!
-
-// Aliyun ASR configuration
-const ASR_ENDPOINT = Deno.env.get('ALIYUN_ASR_ENDPOINT')!
-const ASR_APPKEY = Deno.env.get('ALIYUN_ASR_APPKEY')!
-const ASR_ACCESS_KEY_ID = Deno.env.get('ALIYUN_ASR_ACCESS_KEY_ID')!
-const ASR_ACCESS_KEY_SECRET = Deno.env.get('ALIYUN_ASR_ACCESS_KEY_SECRET')!
-
-// Aliyun TTS configuration
-const TTS_ENDPOINT = Deno.env.get('ALIYUN_TTS_ENDPOINT')!
-const TTS_APPKEY = Deno.env.get('ALIYUN_TTS_APPKEY')!
-const TTS_ACCESS_KEY_ID = Deno.env.get('ALIYUN_TTS_ACCESS_KEY_ID')!
-const TTS_ACCESS_KEY_SECRET = Deno.env.get('ALIYUN_TTS_ACCESS_KEY_SECRET')!
-
-// LLM Gateway URL (same project)
-const LLM_GATEWAY_URL = `${SUPABASE_URL}/functions/v1/llm-gateway`
-
-interface TranslateRequest {
+interface VoiceTranslateRequest {
   audio: string // base64 encoded audio
   sourceLang: string
   targetLang: string
-  format?: string
 }
 
-// Generate Aliyun signature
-async function generateAliyunSignature(
-  accessKeySecret: string,
-  parameters: Record<string, string>
-): Promise<string> {
-  const sortedParams = Object.keys(parameters).sort()
-  const stringToSign = sortedParams
-    .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(parameters[key])}`)
-    .join('&')
-
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(accessKeySecret),
-    { name: 'HMAC', hash: 'SHA-1' },
-    false,
-    ['sign']
-  )
-
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    new TextEncoder().encode(stringToSign)
-  )
-
-  return btoa(String.fromCharCode(...new Uint8Array(signature)))
+// Language code mapping for gummy
+const langMap: Record<string, string> = {
+  'zh': 'zh',
+  'ja': 'ja',
+  'en': 'en',
+  'ko': 'ko',
+  'es': 'es',
+  'fr': 'fr',
+  'de': 'de',
+  'it': 'it',
+  'pt': 'pt',
+  'ru': 'ru',
+  'ar': 'ar',
+  'hi': 'hi',
+  'th': 'th',
+  'vi': 'vi',
+  'id': 'id',
+  'ms': 'ms',
+  'tl': 'fil',
 }
 
-// Speech Recognition (ASR) using Aliyun
-async function speechToText(audioBase64: string): Promise<string> {
-  const appKey = ASR_APPKEY
-  const format = 'opu' // Required format for Aliyun ASR
+// Voice mapping for TTS
+const voiceMap: Record<string, string> = {
+  'zh': 'Cherry',
+  'ja': 'Yunjia',
+  'en': 'Emily',
+  'ko': 'Yunu',
+  'es': 'Linda',
+  'fr': 'Julie',
+  'de': 'Katarina',
+  'it': ' Elsa',
+  'pt': 'Camila',
+  'ru': 'Alyona',
+  'ar': 'Sami',
+  'hi': 'Mithra',
+  'th': 'Michele',
+  'vi': 'Mai',
+  'id': 'Catherine',
+  'ms': 'Lisa',
+  'tl': 'Pilar',
+}
 
-  const response = await fetch(`${ASR_ENDPOINT}/stream?q=asr&format=${format}&appkey=${appKey}&lang=zh`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'audio/' + format,
-      'Authorization': `Authorization`,
-    },
-    body: Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0)),
+// WebSocket语音识别+翻译
+async function speechToTextAndTranslate(
+  audioData: Uint8Array,
+  sourceLang: string,
+  targetLang: string
+): Promise<{ transcription: string; translation: string }> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(WS_ENDPOINT)
+    let resultText = ''
+    let translationText = ''
+
+    ws.onopen = () => {
+      // 发送开始任务
+      const startTask = {
+        header: {
+          task_group: 'audio',
+          task: 'asr',
+          function: 'recognition',
+          model: 'gummy-realtime-v1',
+        },
+        payload: {
+          transcription_enabled: true,
+          translation_enabled: true,
+          translation_target_languages: [langMap[targetLang] || 'en'],
+          format: 'pcm',
+          sample_rate: 16000,
+        },
+      }
+      ws.send(JSON.stringify(startTask))
+    }
+
+    ws.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        const msg = JSON.parse(event.data)
+        if (msg.header?.event === 'result-generated') {
+          const output = msg.payload?.output
+          if (output?.transcription?.text) {
+            resultText = output.transcription.text
+          }
+          if (output?.translations?.[0]?.text) {
+            translationText = output.translations[0].text
+          }
+        } else if (msg.header?.event === 'task-finished') {
+          ws.close()
+          resolve({ transcription: resultText, translation: translationText })
+        } else if (msg.header?.event === 'task-failed') {
+          ws.close()
+          reject(new Error(`Gummy error: ${msg.payload?.error_message || 'Unknown error'}`))
+        }
+      }
+    }
+
+    ws.onerror = (error) => {
+      reject(new Error(`WebSocket error: ${error}`))
+    }
+
+    ws.onclose = () => {
+      if (!resultText && !translationText) {
+        reject(new Error('Connection closed before receiving results'))
+      }
+    }
+
+    // 发送音频数据（需要等待 task-started）
+    let audioSent = false
+    ws.onopen = () => {
+      // 重新发送，因为上面的 onopen 只会执行一次
+    }
+
+    // 改良：先等 task-started 再发音频
+    const originalOnOpen = ws.onopen
+    ws.onopen = () => {
+      originalOnOpen.call(ws)
+      // 发送开始任务
+      const startTask = {
+        header: {
+          task_group: 'audio',
+          task: 'asr',
+          function: 'recognition',
+          model: 'gummy-realtime-v1',
+        },
+        payload: {
+          transcription_enabled: true,
+          translation_enabled: true,
+          translation_target_languages: [langMap[targetLang] || 'en'],
+          format: 'pcm',
+          sample_rate: 16000,
+        },
+      }
+      ws.send(JSON.stringify(startTask))
+    }
+
+    // 监听 task-started 后再发送音频
+    ws.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        const msg = JSON.parse(event.data)
+        if (msg.header?.event === 'task-started' && !audioSent) {
+          audioSent = true
+          ws.send(audioData)
+          // 发送结束任务
+          setTimeout(() => {
+            ws.send(JSON.stringify({
+              header: {
+                task_group: 'audio',
+                task: 'asr',
+                function: 'recognition',
+              },
+              payload: {},
+            }))
+          }, 500)
+        } else if (msg.header?.event === 'result-generated') {
+          const output = msg.payload?.output
+          if (output?.transcription?.text) {
+            resultText = output.transcription.text
+          }
+          if (output?.translations?.[0]?.text) {
+            translationText = output.translations[0].text
+          }
+        } else if (msg.header?.event === 'task-finished') {
+          ws.close()
+          resolve({ transcription: resultText, translation: translationText })
+        } else if (msg.header?.event === 'task-failed') {
+          ws.close()
+          reject(new Error(`Gummy error: ${msg.payload?.error_message || 'Unknown error'}`))
+        }
+      }
+    }
   })
-
-  if (!response.ok) {
-    throw new Error(`ASR failed: ${response.status}`)
-  }
-
-  const text = await response.text()
-  return text
 }
 
-// Text-to-Speech (TTS) using Aliyun
+// TTS语音合成
 async function textToSpeech(text: string, lang: string): Promise<Uint8Array> {
-  const voiceMap: Record<string, string> = {
-    'zh': 'xiaoyun',
-    'ja': 'aiqi',
-    'en': 'xiaoyu',
-    'ko': 'aiyuxin',
-  }
+  const voice = voiceMap[lang] || 'Emily'
 
-  const voice = voiceMap[lang] || 'xiaoyun'
-
-  const params = new URLSearchParams({
-    appkey: TTS_APPKEY,
-    text,
-    voice,
-    format: 'mp3',
-  })
-
-  const signature = await generateAliyunSignature(TTS_ACCESS_KEY_SECRET, {
-    appkey: TTS_APPKEY,
-    text,
-    voice,
-    format: 'mp3',
-  })
-
-  const response = await fetch(`${TTS_ENDPOINT}?${params.toString()}`, {
+  const response = await fetch(TTS_ENDPOINT, {
     method: 'POST',
     headers: {
-      'Authorization': `HmacSHA1 AccessKeyId=${TTS_ACCESS_KEY_ID}, Signature=${signature}`,
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error(`TTS failed: ${response.status}`)
-  }
-
-  const arrayBuffer = await response.arrayBuffer()
-  return new Uint8Array(arrayBuffer)
-}
-
-// Translate text using LLM Gateway
-async function translateText(text: string, sourceLang: string, targetLang: string): Promise<string> {
-  const response = await fetch(LLM_GATEWAY_URL, {
-    method: 'POST',
-    headers: {
+      'Authorization': `Bearer ${DASHSCOPE_API_KEY}`,
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${SERVICE_ROLE_KEY}`,
     },
     body: JSON.stringify({
-      text,
-      sourceLang,
-      targetLang,
+      model: 'qwen3-tts-flash',
+      input: {
+        text,
+      },
+      parameters: {
+        voice,
+        language_type: 'auto',
+        stream: false,
+      },
     }),
   })
 
   if (!response.ok) {
-    throw new Error(`LLM translation failed: ${response.status}`)
+    throw new Error(`TTS error: ${response.status}`)
   }
 
   const data = await response.json()
-  return data.translatedText
+  if (data.status_code !== 200) {
+    throw new Error(`TTS error: ${data.message || 'Unknown error'}`)
+  }
+
+  // 返回 Base64 音频数据
+  const audioBase64 = data.output?.audio?.data
+  if (!audioBase64) {
+    throw new Error('No audio data in TTS response')
+  }
+
+  // 解码 Base64 为 Uint8Array
+  const binaryString = atob(audioBase64)
+  const bytes = new Uint8Array(binaryString.length)
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i)
+  }
+  return bytes
 }
 
 // Deno serve handler
 Deno.serve(async (req) => {
-  // CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       headers: {
@@ -153,7 +241,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { audio, sourceLang, targetLang } = await req.json() as TranslateRequest
+    const { audio, sourceLang, targetLang } = await req.json() as VoiceTranslateRequest
 
     if (!audio || !sourceLang || !targetLang) {
       return Response.json(
@@ -162,68 +250,60 @@ Deno.serve(async (req) => {
       )
     }
 
-    console.log(`Processing voice translation: ${sourceLang} -> ${targetLang}`)
+    console.log(`Voice translate: ${sourceLang} -> ${targetLang}`)
 
-    // Step 1: ASR - Speech to Text
-    let originalText: string
+    // 解码音频
+    const audioData = Uint8Array.from(atob(audio), c => c.charCodeAt(0))
+
+    // 步骤1: 语音识别+翻译 (gummy WebSocket)
+    let transcription = ''
+    let translation = ''
     try {
-      originalText = await speechToText(audio)
+      const result = await speechToTextAndTranslate(audioData, sourceLang, targetLang)
+      transcription = result.transcription
+      translation = result.translation
     } catch (asrError) {
-      console.error('ASR failed:', asrError)
-      // Fallback: return error since ASR is required
+      console.error('ASR+Translation failed:', asrError)
       return Response.json(
         { error: 'Speech recognition failed. Please speak clearly and try again.' },
         { status: 422 }
       )
     }
 
-    // Step 2: LLM - Translate
-    let translatedText: string
-    try {
-      translatedText = await translateText(originalText, sourceLang, targetLang)
-    } catch (llmError) {
-      console.error('LLM translation failed:', llmError)
-      return Response.json(
-        { error: 'Translation failed. Please try again.' },
-        { status: 500 }
-      )
-    }
-
-    // Step 3: TTS - Text to Speech (optional, for target language)
+    // 步骤2: TTS (可选，如果失败不影响主要功能)
     let audioUrl: string | undefined
     try {
-      const ttsAudio = await textToSpeech(translatedText, targetLang)
+      const ttsAudio = await textToSpeech(translation, targetLang)
 
-      // Upload to Supabase Storage
-      const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+      // 上传到 Supabase Storage
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+      const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
       const fileName = `voice_${Date.now()}.mp3`
 
-      const { data, error } = await supabase.storage
-        .from('translations')
-        .upload(fileName, ttsAudio, {
-          contentType: 'audio/mp3',
-        })
+      const uploadResponse = await fetch(
+        `${supabaseUrl}/storage/v1/object/translations/${fileName}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'audio/mp3',
+          },
+          body: ttsAudio,
+        }
+      )
 
-      if (error) {
-        console.error('Storage upload failed:', error)
-      } else {
-        const { data: urlData } = supabase.storage
-          .from('translations')
-          .getPublicUrl(fileName)
-        audioUrl = urlData.publicUrl
+      if (uploadResponse.ok) {
+        audioUrl = `${supabaseUrl}/storage/v1/object/public/translations/${fileName}`
       }
     } catch (ttsError) {
       console.warn('TTS failed, continuing without audio:', ttsError)
-      // TTS is optional, continue without audio
     }
 
     return Response.json({
       success: true,
-      originalText,
-      translatedText,
+      originalText: transcription,
+      translatedText: translation,
       audioUrl,
-      sourceLang,
-      targetLang,
     })
   } catch (error) {
     console.error('Voice translate error:', error)

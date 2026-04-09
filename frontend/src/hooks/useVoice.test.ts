@@ -1,16 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock FileReader
-class MockFileReader {
-  onloadend: ((this: FileReader, ev: ProgressEvent<FileReader>) => void) | null = null
-  result: string | ArrayBuffer | null = null
-  readAsDataURL = vi.fn((_blob: Blob) => {
-    this.result = 'data:audio/webm;base64,dGVzdA=='
-    this.onloadend?.({} as ProgressEvent<FileReader>)
-  })
+const mockFileReaderResult = 'data:audio/webm;base64,dGVzdA=='
+
+// Store onloadend callback for later invocation
+function createMockFileReader() {
+  let onloadendHandler: ((this: FileReader, ev: ProgressEvent<FileReader>) => void) | null = null
+
+  return {
+    get onloadend() {
+      return onloadendHandler
+    },
+    set onloadend(handler) {
+      onloadendHandler = handler
+    },
+    result: mockFileReaderResult,
+    readAsDataURL: (_blob: Blob) => {
+      // Call onloadend after a tick to simulate async FileReader behavior
+      setTimeout(() => {
+        if (onloadendHandler) {
+          const event = { target: { result: mockFileReaderResult } } as ProgressEvent<FileReader>
+          onloadendHandler.call({} as FileReader, event)
+        }
+      }, 0)
+    },
+    onerror: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }
 }
 
-vi.stubGlobal('FileReader', MockFileReader)
+vi.stubGlobal('FileReader', createMockFileReader as unknown as typeof FileReader)
 
 // Mock URL
 const mockUrls = new Map<string, string>()
