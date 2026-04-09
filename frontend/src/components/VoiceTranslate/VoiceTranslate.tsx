@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useVoice, blobToBase64, playAudio } from '../../hooks/useVoice'
+import { useVoice, convertToPCM, playAudio } from '../../hooks/useVoice'
 import { checkQuota } from '../../services/quota'
 import { voiceTranslate } from '../../services/translation'
 import { SUPPORTED_LANGUAGES, type LanguageCode } from '../../types'
@@ -31,17 +31,21 @@ export default function VoiceTranslate() {
   }, [])
 
   async function handleRecordingComplete(blob: Blob, recordedDuration: number) {
-    console.log(`Recording complete: ${recordedDuration}s`)
+    console.log(`Recording complete: ${recordedDuration}s, size: ${blob.size}`)
 
     setIsLoading(true)
     setError('')
 
     try {
-      // Convert to base64
-      const audioBase64 = await blobToBase64(blob)
+      // Convert to PCM format for gummy
+      const audioData = await convertToPCM(blob)
+      console.log(`Converted to PCM: ${audioData.length} bytes`)
+
+      // Convert to base64 for API
+      const base64 = btoa(String.fromCharCode(...audioData))
 
       // Call translation API
-      const result = await voiceTranslate(audioBase64, sourceLang, targetLang, 'audio/webm')
+      const result = await voiceTranslate(base64, sourceLang, targetLang, 'audio/pcm')
 
       setOriginalText(result.originalText || '')
       setTranslatedText(result.translatedText || '')

@@ -124,7 +124,31 @@ export function useVoice(options: UseVoiceOptions = {}): UseVoiceReturn {
   }
 }
 
-// Convert Blob to Base64
+// Convert Blob (audio/webm) to PCM format required by gummy
+export async function convertToPCM(blob: Blob, targetSampleRate = 16000): Promise<Uint8Array> {
+  // Decode audio using Web Audio API
+  const arrayBuffer = await blob.arrayBuffer()
+  const audioContext = new AudioContext({ sampleRate: targetSampleRate })
+  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+
+  // Get mono channel data at target sample rate
+  const channelData = audioBuffer.getChannelData(0)
+
+  // Convert Float32Array to Int16Array (PCM 16-bit)
+  const pcmData = new Int16Array(channelData.length)
+  for (let i = 0; i < channelData.length; i++) {
+    const s = Math.max(-1, Math.min(1, channelData[i]))
+    pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+  }
+
+  // Convert to Uint8Array
+  const uint8Array = new Uint8Array(pcmData.buffer)
+  audioContext.close()
+
+  return uint8Array
+}
+
+// Convert Blob to Base64 (original function)
 export async function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
