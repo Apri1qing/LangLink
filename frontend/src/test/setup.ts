@@ -1,14 +1,13 @@
-// Test setup file
-import { expect, afterEach } from 'vitest'
+// Test setup file - vitest globals are available via tsconfig
 import { cleanup } from '@testing-library/react'
-import { afterEach as cleanupHooks } from 'vitest'
+import { afterEach } from 'vitest'
 
 // Cleanup after each test
 afterEach(() => {
   cleanup()
 })
 
-// Mock Supabase client
+// Mock Supabase client for all tests
 vi.mock('./services/supabase', () => ({
   supabase: {
     auth: {

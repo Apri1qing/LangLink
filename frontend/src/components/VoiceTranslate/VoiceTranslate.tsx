@@ -1,17 +1,24 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useVoice, blobToBase64, playAudio } from '../../hooks/useVoice'
 import { checkQuota } from '../../services/quota'
+import { voiceTranslate } from '../../services/translation'
 import { SUPPORTED_LANGUAGES, type LanguageCode } from '../../types'
 
 export default function VoiceTranslate() {
-  const [isRecording, setIsRecording] = useState(false)
   const [sourceLang, setSourceLang] = useState<LanguageCode>('zh')
   const [targetLang, setTargetLang] = useState<LanguageCode>('ja')
-  const [originalText] = useState('')
-  const [translatedText] = useState('')
-  const [, setIsLoading] = useState(false)
+  const [originalText, setOriginalText] = useState('')
+  const [translatedText, setTranslatedText] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [remaining, setRemaining] = useState<number | null>(null)
   const [showQuotaWarning, setShowQuotaWarning] = useState(false)
+  const [showResult, setShowResult] = useState(false)
+
+  const { isRecording, duration, startRecording, stopRecording, error: recordingError } = useVoice({
+    onRecordingComplete: handleRecordingComplete,
+    onError: (err) => setError(err.message),
+  })
 
   // Check quota on mount
   useEffect(() => {
@@ -23,31 +30,48 @@ export default function VoiceTranslate() {
     })
   }, [])
 
-  const handleQuotaExceeded = () => {
-    setShowQuotaWarning(true)
-    setError('今日翻译次数已用完，请明天再来或升级到 Pro 版本')
+  async function handleRecordingComplete(blob: Blob, recordedDuration: number) {
+    console.log(`Recording complete: ${recordedDuration}s`)
+
+    setIsLoading(true)
+    setError('')
+
+    try {
+      // Convert to base64
+      const audioBase64 = await blobToBase64(blob)
+
+      // Call translation API
+      const result = await voiceTranslate(audioBase64, sourceLang, targetLang, 'audio/webm')
+
+      setOriginalText(result.originalText || '')
+      setTranslatedText(result.translatedText || '')
+      setShowResult(true)
+
+      // Auto-play translated audio
+      if (result.audioUrl) {
+        playAudio(result.audioUrl)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Translation failed')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  // Suppress unused warning
-  void handleQuotaExceeded
-
-  const handleRecording = () => {
+  const handleRecording = useCallback(async () => {
     if (showQuotaWarning) {
       setError('今日翻译次数已用完')
       return
     }
 
     if (isRecording) {
-      setIsRecording(false)
-      // TODO: Stop recording and process
+      await stopRecording()
     } else {
-      setIsRecording(true)
-      // TODO: Start recording
+      setError('')
+      setShowResult(false)
+      await startRecording()
     }
-  }
-
-  // Suppress unused warnings
-  void setIsLoading
+  }, [isRecording, showQuotaWarning, startRecording, stopRecording])
 
   return (
     <div className="max-w-md mx-auto">
@@ -71,7 +95,8 @@ export default function VoiceTranslate() {
         <select
           value={sourceLang}
           onChange={(e) => setSourceLang(e.target.value as LanguageCode)}
-          className="px-3 py-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text-heading)]"
+          disabled={isLoading}
+          className="px-3 py-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text-heading)] disabled:opacity-50"
         >
           {SUPPORTED_LANGUAGES.map((lang) => (
             <option key={lang.code} value={lang.code}>
@@ -85,7 +110,8 @@ export default function VoiceTranslate() {
         <select
           value={targetLang}
           onChange={(e) => setTargetLang(e.target.value as LanguageCode)}
-          className="px-3 py-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text-heading)]"
+          disabled={isLoading}
+          className="px-3 py-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text-heading)] disabled:opacity-50"
         >
           {SUPPORTED_LANGUAGES.map((lang) => (
             <option key={lang.code} value={lang.code}>
@@ -99,17 +125,21 @@ export default function VoiceTranslate() {
       <div className="flex flex-col items-center">
         <button
           onClick={handleRecording}
-          disabled={showQuotaWarning}
+          disabled={isLoading || showQuotaWarning}
           className={`w-24 h-24 rounded-full flex items-center justify-center text-4xl transition-all ${
             isRecording
               ? 'bg-red-500 text-white animate-pulse'
               : 'bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary)]/90'
           } disabled:opacity-50 disabled:cursor-not-allowed`}
         >
-          {isRecording ? '⏹' : '🎤'}
+          {isLoading ? '⏳' : isRecording ? '⏹' : '🎤'}
         </button>
         <p className="mt-4 text-sm text-[var(--color-text)]">
-          {isRecording ? '点击结束录音' : '点击开始录音'}
+          {isLoading
+            ? '翻译中...'
+            : isRecording
+              ? `录音中 ${duration.toFixed(1)}s - 点击结束`
+              : '点击开始录音'}
         </p>
         <p className="mt-2 text-xs text-[var(--color-text)]">
           剩余 {remaining ?? '--'} 次翻译
@@ -117,27 +147,31 @@ export default function VoiceTranslate() {
       </div>
 
       {/* Result Display */}
-      {(originalText || translatedText) && (
+      {showResult && (originalText || translatedText) && (
         <div className="mt-8 p-4 bg-[var(--color-primary-bg)] rounded-lg">
           {originalText && (
             <div className="mb-4">
-              <p className="text-xs text-[var(--color-text)] mb-1">原文</p>
+              <p className="text-xs text-[var(--color-text)] mb-1">
+                <span className="font-medium">原文:</span> {SUPPORTED_LANGUAGES.find((l) => l.code === sourceLang)?.name}
+              </p>
               <p className="text-lg text-[var(--color-text-heading)]">{originalText}</p>
             </div>
           )}
           {translatedText && (
             <div>
-              <p className="text-xs text-[var(--color-text)] mb-1">翻译</p>
+              <p className="text-xs text-[var(--color-text)] mb-1">
+                <span className="font-medium">翻译:</span> {SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name}
+              </p>
               <p className="text-2xl font-bold text-[var(--color-text-heading)]">{translatedText}</p>
             </div>
           )}
         </div>
       )}
 
-      {/* Error Display */}
-      {error && (
+      {/* Recording Error */}
+      {(error || recordingError) && (
         <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-red-700 text-sm">{error}</p>
+          <p className="text-red-700 text-sm">{error || recordingError}</p>
         </div>
       )}
     </div>

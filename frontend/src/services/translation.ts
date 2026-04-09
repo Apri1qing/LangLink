@@ -2,7 +2,7 @@
 // Handles translation requests with caching
 
 import { supabase } from './supabase'
-import type { ApiResponse, VoiceTranslateResponse, ImageTranslateResponse } from '../types'
+import type { VoiceTranslateResponse, ImageTranslateResponse } from '../types'
 
 const FUNCTIONS_URL = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL
 
