@@ -1,9 +1,9 @@
-# TravelTalk 技术方案 v1.0
+# TravelTalk 技术方案 v1.1
 
 ## 一、产品概述
 
 单页 PWA 旅行翻译工具，核心功能：
-- **语音翻译**：音频 → ASR → 文本 → LLM翻译 → TTS → 返回
+- **语音翻译**：WebSocket 实时语音识别 + 翻译 → TTS 语音合成
 - **图片翻译**：图片 → OCR → 文本 → LLM翻译 → 渲染
 - **常用语**：本地存储，离线可用
 - **支持语言**：全球主流语言
@@ -31,8 +31,8 @@
                               │
               ┌───────────────┼───────────────┐
               ▼               ▼               ▼
-           ASR            LLM              TTS/OCR
-        (阿里云)      (多API轮询)          (阿里云)
+           ASR+翻译        TTS              OCR
+        (阿里云gummy)   (阿里云)         (阿里云)
 ```
 
 ---
@@ -62,37 +62,103 @@
 ### AI 服务
 | 功能 | 厂商 | 说明 |
 |------|------|------|
-| ASR | 阿里云 | 语音识别 |
+| ASR + 翻译 | **阿里云 gummy** | WebSocket 实时语音识别+翻译（一步完成） |
 | TTS | 阿里云 | 语音合成（日文最自然） |
 | OCR | 阿里云 | 文字识别 |
 | LLM | **用户自提供多 API** | 轮询调用，OpenAI 兼容格式 |
 
 ---
 
-## 四、API 设计
+## 四、语音翻译技术方案
 
-### 4.1 语音翻译
+### 4.1 阿里云 gummy 实时语音 API
+
+**接入方式**: WebSocket
+**地址**: `wss://dashscope.aliyuncs.com/api-ws/v1/inference`
+
+**鉴权**: `Authorization: Bearer <DASHSCOPE_API_KEY>`
+
+**核心流程**:
 ```
-POST /api/v1/voice/translate
+1. 建立 WebSocket 连接
+2. 发送 task_group=audio, task=asr, function=recognition
+3. 启用 translation_enabled=true
+4. 发送音频流（16kHz PCM）
+5. 实时接收 transcription + translations
+6. 发送 finish-task
+7. 关闭连接
+```
+
+**消息格式**:
+```json
+// 发送：开始任务
+{"header":{"task_group":"audio","task":"asr","function":"recognition","model":"gummy-realtime-v1"},"payload":{"transcription_enabled":true,"translation_enabled":true,"translation_target_languages":["en"],"format":"pcm","sample_rate":16000}}
+
+// 发送：二进制音频
+<binary audio data>
+
+// 发送：结束任务
+{"header":{"task_group":"audio","task":"asr","function":"recognition"},"payload":{"}}
+
+// 接收：识别+翻译结果
+{"header":{"event":"result-generated"},"payload":{"output":{"transcription":{"text":"原文"},"translations":[{"lang":"en","text":"翻译"}]}}}
+```
+
+### 4.2 语音翻译链路
+
+```
+录音 (Web Audio API)
+    ↓
+WebSocket → 阿里云 gummy (ASR + 翻译 同时完成)
+    ↓
+接收 transcription + translations
+    ↓
+TTS → 阿里云语音合成
+    ↓
+播放音频 + 显示文字结果
+```
+
+---
+
+## 五、API 设计
+
+### 5.1 语音翻译（WebSocket 实时）
+```
+前端直接连接 WebSocket，无需 Edge Function
+
+URL: wss://dashscope.aliyuncs.com/api-ws/v1/inference
+Header: Authorization: Bearer <DASHSCOPE_API_KEY>
+
+请求:
 {
-  "audio": "base64-audio",
-  "sourceLang": "zh",
-  "targetLang": "ja",
-  "format": "audio/webm"
+  "header": {
+    "task_group": "audio",
+    "task": "asr",
+    "function": "recognition",
+    "model": "gummy-realtime-v1"
+  },
+  "payload": {
+    "transcription_enabled": true,
+    "translation_enabled": true,
+    "translation_target_languages": ["ja"],
+    "format": "pcm",
+    "sample_rate": 16000
+  }
 }
 
 响应:
 {
-  "code": 200,
-  "data": {
-    "originalText": "地铁站在哪里",
-    "translatedText": "Where is the subway station?",
-    "audioUrl": "/api/v1/voice/audio/{id}.mp3"
+  "header": {"event": "result-generated"},
+  "payload": {
+    "output": {
+      "transcription": {"text": "地铁站在哪里"},
+      "translations": [{"lang": "ja", "text": "地下鉄はどこですか"}]
+    }
   }
 }
 ```
 
-### 4.2 图片翻译
+### 5.2 图片翻译
 ```
 POST /api/v1/image/translate
 Content-Type: multipart/form-data
@@ -112,7 +178,7 @@ targetLang: ja
 }
 ```
 
-### 4.3 常用语 CRUD
+### 5.3 常用语 CRUD
 ```
 GET    /api/v1/phrases
 POST   /api/v1/phrases
@@ -120,20 +186,20 @@ PUT    /api/v1/phrases/{id}
 DELETE /api/v1/phrases/{id}
 ```
 
-### 4.4 支持语言
+### 5.4 支持语言
 ```
 zh, ja, en, ko, es, fr, de, it, pt, ru, ar, hi, th, vi, id, ms, tl
 ```
 
 ---
 
-## 五、数据模型
+## 六、数据模型
 
 ### phrases
 ```sql
 CREATE TABLE phrases (
     id BIGSERIAL PRIMARY KEY,
-    user_id UUID REFERENCES auth.users,
+    user_id UUID REFERENCES auth.users ON DELETE CASCADE,
     text VARCHAR(500) NOT NULL,
     translation VARCHAR(500),
     source_lang VARCHAR(10) DEFAULT 'zh',
@@ -167,7 +233,7 @@ CREATE TABLE translations_cache (
 ```sql
 CREATE TABLE user_quotas (
     id BIGSERIAL PRIMARY KEY,
-    user_id UUID REFERENCES auth.users NOT NULL UNIQUE,
+    user_id UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL UNIQUE,
     plan VARCHAR(20) DEFAULT 'free',
     daily_limit INTEGER DEFAULT 50,
     daily_used INTEGER DEFAULT 0,
@@ -180,7 +246,7 @@ CREATE TABLE user_quotas (
 ```sql
 CREATE TABLE translation_logs (
     id BIGSERIAL PRIMARY KEY,
-    user_id UUID REFERENCES auth.users NOT NULL,
+    user_id UUID REFERENCES auth.users ON DELETE SET NULL,
     type VARCHAR(10) NOT NULL,
     source_lang VARCHAR(10),
     target_lang VARCHAR(10),
@@ -191,7 +257,7 @@ CREATE TABLE translation_logs (
 
 ---
 
-## 六、项目目录
+## 七、项目目录
 
 ```
 travelingAssistant/
@@ -203,6 +269,7 @@ travelingAssistant/
 │   │   │   ├── Phrases/
 │   │   │   └── common/
 │   │   ├── hooks/
+│   │   │   └── useVoice.ts    # 录音 + WebSocket
 │   │   ├── services/
 │   │   ├── stores/
 │   │   └── utils/
@@ -211,79 +278,73 @@ travelingAssistant/
 │
 ├── supabase/                    # Supabase 后端
 │   ├── functions/
-│   │   ├── voice-translate/
-│   │   ├── image-translate/
-│   │   └── llm-gateway/
+│   │   ├── image-translate/    # 图片翻译
+│   │   └── llm-gateway/        # LLM 轮询
 │   ├── migrations/
 │   │   └── 001_init.sql
 │   └── config.toml
 │
 ├── docs/
-│   └── tech-design.md          # 本文档
+│   └── tech-design.md
 │
 └── README.md
 ```
 
 ---
 
-## 七、开发阶段
+## 八、开发阶段
 
 | 阶段 | 内容 | 状态 | 产出物 |
 |------|------|------|--------|
 | **阶段一** | 基础架构：前端脚手架 + Supabase 项目 | ✅ 完成 | 可运行空项目 |
 | **阶段二** | 数据库设计 + 限流中间件 | ✅ 完成 | 数据库表 + Edge Function |
 | **阶段三** | LLM 多 API 轮询网关 | ✅ 完成 | Edge Function + 前端 Service |
-| **阶段四** | 语音翻译全链路（ASR → LLM → TTS） | ✅ 完成 | 完整语音翻译 |
+| **阶段四** | 语音翻译（WebSocket gummy + TTS） | 🔄 更新中 | 语音翻译链路 |
 | **阶段五** | 图片翻译链路（OCR → LLM） | ⏳ 待开始 | 完整图片翻译 |
 | **阶段六** | 常用语 CRUD + 本地存储 | ⏳ 待开始 | PWA 离线支持 |
 | **阶段七** | PWA 配置 + 优化 + 上线 | ⏳ 待开始 | 生产可用 |
 
 ---
 
-## 八、Git 提交规范
-
-```
-feat(phaseN): 阶段名称
-
-- 具体改动1
-- 具体改动2
-```
-
-### 提交记录
+## 九、Git 提交记录
 
 | Commit | 阶段 | 描述 |
 |--------|------|------|
 | `56f8068` | 阶段一 | 基础架构搭建 |
-| `d1a9c70` | 文档 | 更新 tech-design.md |
-| `8a8a876` | 阶段四 | 语音翻译全链路（ASR → LLM → TTS） |
-| - | 阶段五 | (待开发) |
-| - | 阶段四 | (待开发) |
-| - | 阶段五 | (待开发) |
-| - | 阶段六 | (待开发) |
-| - | 阶段七 | (待开发) |
+| `367c05e` | 阶段二 | 数据库设计 + 限流中间件 |
+| `0fc907d` | 阶段三 | LLM 多 API 轮询网关 |
+| `8a8a876` | 阶段四 | 语音翻译全链路 |
+| `763e15d` | 文档 | 更新 tech-design.md |
 
 ---
 
-## 九、环境变量
+## 十、环境变量
 
-### Supabase Secrets
-```bash
-# 阿里云 AI 服务
-ALIYUN_ASR_ENDPOINT=https://nls-gateway.cn-shanghai.aliyuncs.com
-ALIYUN_ASR_APPKEY=xxx
-ALIYUN_ASR_ACCESS_KEY_ID=xxx
-ALIYUN_ASR_ACCESS_KEY_SECRET=xxx
+### 阿里云（语音 + 图片）
 
+**gummy 实时语音（ASR + 翻译）：**
+```
+DASHSCOPE_API_KEY=你的dashscope密钥
+```
+
+**TTS 语音合成：**
+```
 ALIYUN_TTS_ENDPOINT=https://nls-gateway.cn-shanghai.aliyuncs.com
 ALIYUN_TTS_APPKEY=xxx
 ALIYUN_TTS_ACCESS_KEY_ID=xxx
 ALIYUN_TTS_ACCESS_KEY_SECRET=xxx
+```
 
+**OCR 文字识别：**
+```
 ALIYUN_OCR_ENDPOINT=https://ocrapi.cn-hangzhou.aliyuncs.com
 ALIYUN_OCR_ACCESS_KEY_ID=xxx
 ALIYUN_OCR_ACCESS_KEY_SECRET=xxx
+```
 
-# LLM 多 API 轮询
+### LLM（翻译 - 用户自提供）
+
+```
 LLM_API_1=https://your-api-1.com/v1/chat/completions
 LLM_API_KEY_1=sk-xxx
 LLM_MODEL_1=gpt-4o
@@ -293,9 +354,16 @@ LLM_API_KEY_2=sk-ant-xxx
 LLM_MODEL_2=claude-3-5-sonnet
 ```
 
+### Supabase（Edge Functions）
+
+```
+SUPABASE_URL=https://eulnavmuqtnbtwcwlmzp.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=xxx
+```
+
 ---
 
-## 十、部署
+## 十一、部署
 
 | 服务 | 方案 | 成本 |
 |------|------|------|
