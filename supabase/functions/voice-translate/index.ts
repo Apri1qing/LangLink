@@ -53,6 +53,13 @@ const voiceMap: Record<string, string> = {
   'tl': 'Pilar',
 }
 
+// Generate UUID for task_id
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'.replace(/x/g, () =>
+    Math.floor(Math.random() * 16).toString(16)
+  )
+}
+
 // WebSocket语音识别+翻译
 async function speechToTextAndTranslate(
   audioData: Uint8Array,
@@ -63,33 +70,37 @@ async function speechToTextAndTranslate(
     const ws = new WebSocket(WS_ENDPOINT)
     let resultText = ''
     let translationText = ''
-    let taskStarted = false
+    const taskId = generateUUID()
 
     // Convert audio to base64
     const audioBase64 = btoa(String.fromCharCode(...audioData))
 
     ws.onopen = () => {
-      // 发送开始任务
-      const startTask = {
+      // 发送 run-task 消息（按照文档格式）
+      const runTask = {
         header: {
-          action: 'start',
-          task_group: 'audio',
-          task: 'asr',
-          function: 'recognition',
-          model: 'gummy-realtime-v1',
+          streaming: 'duplex',
+          task_id: taskId,
+          action: 'run-task',
         },
         payload: {
-          transcription_enabled: true,
-          translation_enabled: true,
-          translation_target_languages: [langMap[targetLang] || 'en'],
-          format: 'pcm',
-          sample_rate: 16000,
+          model: 'gummy-realtime-v1',
+          parameters: {
+            sample_rate: 16000,
+            format: 'pcm',
+            transcription_enabled: true,
+            translation_enabled: true,
+            translation_target_languages: [langMap[targetLang] || 'en'],
+          },
           input: {
             audio: audioBase64,
           },
+          task: 'asr',
+          task_group: 'audio',
+          function: 'recognition',
         },
       }
-      ws.send(JSON.stringify(startTask))
+      ws.send(JSON.stringify(runTask))
     }
 
     ws.onmessage = (event) => {
@@ -98,8 +109,9 @@ async function speechToTextAndTranslate(
         console.log('Gummy message:', JSON.stringify(msg).substring(0, 300))
 
         if (msg.header?.event === 'task-started') {
-          taskStarted = true
-          console.log('Task started, audio was included in start message')
+          console.log('Task started')
+          // 发送二进制音频
+          ws.send(audioData)
         } else if (msg.header?.event === 'result-generated') {
           const output = msg.payload?.output
           if (output?.transcription?.text) {
