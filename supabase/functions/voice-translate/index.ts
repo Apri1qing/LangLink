@@ -63,11 +63,16 @@ async function speechToTextAndTranslate(
     const ws = new WebSocket(WS_ENDPOINT)
     let resultText = ''
     let translationText = ''
+    let taskStarted = false
+
+    // Convert audio to base64
+    const audioBase64 = btoa(String.fromCharCode(...audioData))
 
     ws.onopen = () => {
       // 发送开始任务
       const startTask = {
         header: {
+          action: 'start',
           task_group: 'audio',
           task: 'asr',
           function: 'recognition',
@@ -79,6 +84,9 @@ async function speechToTextAndTranslate(
           translation_target_languages: [langMap[targetLang] || 'en'],
           format: 'pcm',
           sample_rate: 16000,
+          input: {
+            audio: audioBase64,
+          },
         },
       }
       ws.send(JSON.stringify(startTask))
@@ -87,7 +95,12 @@ async function speechToTextAndTranslate(
     ws.onmessage = (event) => {
       if (typeof event.data === 'string') {
         const msg = JSON.parse(event.data)
-        if (msg.header?.event === 'result-generated') {
+        console.log('Gummy message:', JSON.stringify(msg).substring(0, 300))
+
+        if (msg.header?.event === 'task-started') {
+          taskStarted = true
+          console.log('Task started, audio was included in start message')
+        } else if (msg.header?.event === 'result-generated') {
           const output = msg.payload?.output
           if (output?.transcription?.text) {
             resultText = output.transcription.text
@@ -112,71 +125,6 @@ async function speechToTextAndTranslate(
     ws.onclose = () => {
       if (!resultText && !translationText) {
         reject(new Error('Connection closed before receiving results'))
-      }
-    }
-
-    // 发送音频数据（需要等待 task-started）
-    let audioSent = false
-    ws.onopen = () => {
-      // 重新发送，因为上面的 onopen 只会执行一次
-    }
-
-    // 改良：先等 task-started 再发音频
-    const originalOnOpen = ws.onopen
-    ws.onopen = () => {
-      originalOnOpen.call(ws)
-      // 发送开始任务
-      const startTask = {
-        header: {
-          task_group: 'audio',
-          task: 'asr',
-          function: 'recognition',
-          model: 'gummy-realtime-v1',
-        },
-        payload: {
-          transcription_enabled: true,
-          translation_enabled: true,
-          translation_target_languages: [langMap[targetLang] || 'en'],
-          format: 'pcm',
-          sample_rate: 16000,
-        },
-      }
-      ws.send(JSON.stringify(startTask))
-    }
-
-    // 监听 task-started 后再发送音频
-    ws.onmessage = (event) => {
-      if (typeof event.data === 'string') {
-        const msg = JSON.parse(event.data)
-        if (msg.header?.event === 'task-started' && !audioSent) {
-          audioSent = true
-          ws.send(audioData)
-          // 发送结束任务
-          setTimeout(() => {
-            ws.send(JSON.stringify({
-              header: {
-                task_group: 'audio',
-                task: 'asr',
-                function: 'recognition',
-              },
-              payload: {},
-            }))
-          }, 500)
-        } else if (msg.header?.event === 'result-generated') {
-          const output = msg.payload?.output
-          if (output?.transcription?.text) {
-            resultText = output.transcription.text
-          }
-          if (output?.translations?.[0]?.text) {
-            translationText = output.translations[0].text
-          }
-        } else if (msg.header?.event === 'task-finished') {
-          ws.close()
-          resolve({ transcription: resultText, translation: translationText })
-        } else if (msg.header?.event === 'task-failed') {
-          ws.close()
-          reject(new Error(`Gummy error: ${msg.payload?.error_message || 'Unknown error'}`))
-        }
       }
     }
   })

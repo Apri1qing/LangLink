@@ -38,10 +38,11 @@ interface LLMConfig {
   model: string
 }
 
-// Get LLM configs from environment
+// Get LLM configs from environment - uses DASHSCOPE_API_KEY by default
 function getLLMConfigs(): LLMConfig[] {
   const configs: LLMConfig[] = []
 
+  // Check for user-configured LLM APIs first
   // LLM_API_1
   const api1 = Deno.env.get('LLM_API_1')
   const key1 = Deno.env.get('LLM_API_KEY_1')
@@ -56,6 +57,14 @@ function getLLMConfigs(): LLMConfig[] {
   const model2 = Deno.env.get('LLM_MODEL_2')
   if (api2 && key2 && model2) {
     configs.push({ apiKey: key2, model: model2 })
+  }
+
+  // Fallback to DASHSCOPE_API_KEY with qwen model if no custom APIs configured
+  if (configs.length === 0) {
+    configs.push({
+      apiKey: DASHSCOPE_API_KEY,
+      model: 'qwen-plus',
+    })
   }
 
   return configs
