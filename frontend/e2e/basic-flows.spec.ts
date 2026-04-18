@@ -98,6 +98,20 @@ test.describe('TravelTalk 关键流程', () => {
     // 返回 Home 页面
     await expect(page.locator('button:has-text("多少钱")')).toBeVisible()
   })
+
+  test('Home_Result 返回按钮', async ({ page }) => {
+    // 触发翻译结果页
+    await page.click('button:has-text("多少钱")')
+
+    // 结果页出现
+    await expect(page.locator('text=3秒后自动关闭')).toBeVisible()
+
+    // 点击返回按钮
+    await page.click('button:has-text("←")')
+
+    // 返回 Home
+    await expect(page.locator('button:has-text("多少钱")')).toBeVisible()
+  })
 })
 
 // Voice Mode 录音流程需要真实 Supabase Edge Functions
