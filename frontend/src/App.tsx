@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useAppStore } from './stores/appStore'
 import { Home } from './components/Home/Home'
 import { Home_Result } from './components/Home/Home_Result'
@@ -6,19 +6,35 @@ import { Menu } from './components/Menu/Menu'
 import { VoiceMode } from './components/VoiceMode/VoiceMode'
 import { isSupabaseConfigured } from './services/supabase'
 import { getPhrases, addPhrase, deletePhrase } from './services/phrases'
-import { getSessions, deleteSession } from './services/sessions'
+import { getSessions, addSession, deleteSession } from './services/sessions'
 import type { Phrase } from './types'
 import type { Session } from './services/sessions'
+import type { AppPageState } from './stores/appStore'
 
 function App() {
-  const { currentPage, displayMode, setPage } = useAppStore()
+  const { currentPage, displayMode, setPage, sourceLang, targetLang, originalText } = useAppStore()
   const [phrases, setPhrases] = useState<Phrase[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
+  const prevPageRef = useRef<AppPageState>('home')
 
   useEffect(() => {
     setPhrases(getPhrases())
     setSessions(getSessions())
   }, [])
+
+  // Record session when entering result page with translation
+  useEffect(() => {
+    if (currentPage === 'result' && originalText && prevPageRef.current !== 'result') {
+      addSession({
+        type: 'voice',
+        sourceLang,
+        targetLang,
+        lastMessage: originalText.slice(0, 50),
+      })
+      setSessions(getSessions())
+    }
+    prevPageRef.current = currentPage
+  }, [currentPage, originalText, sourceLang, targetLang])
 
   const handleAddPhrase = (text: string, translation: string) => {
     addPhrase(text, translation)
