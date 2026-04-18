@@ -12,7 +12,7 @@ import type { Session } from './services/sessions'
 import type { AppPageState } from './stores/appStore'
 
 function App() {
-  const { currentPage, displayMode, setPage, sourceLang, targetLang, originalText } = useAppStore()
+  const { currentPage, displayMode, setPage, sourceLang, targetLang, originalText, translationType } = useAppStore()
   const [phrases, setPhrases] = useState<Phrase[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const prevPageRef = useRef<AppPageState>('home')
@@ -26,7 +26,7 @@ function App() {
   useEffect(() => {
     if (currentPage === 'result' && originalText && prevPageRef.current !== 'result') {
       addSession({
-        type: 'voice',
+        type: translationType,
         sourceLang,
         targetLang,
         lastMessage: originalText.slice(0, 50),
