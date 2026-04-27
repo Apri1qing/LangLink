@@ -33,12 +33,15 @@
   }
 }
 
-body {
+html, body {
   margin: 0;
-  min-height: 100dvh;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;          /* 锁死 body 不可滚动 */
+  overscroll-behavior: none; /* 禁止 iOS 橡皮筋下拉刷新 */
   background-color: var(--color-bg);
   color: var(--color-text);
-  overscroll-behavior: none;
+  touch-action: pan-x pan-y; /* 允许滚动手势传给子元素，不触发页面级滚动 */
 }
 
 /* 隐藏滚动条工具类 */
@@ -51,9 +54,9 @@ body {
 }
 
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 1rem;
+  height: 100%;              /* 撑满 body */
+  margin: 0;
+  padding: 0;                /* 移除默认 1rem padding，防止撑出滚动 */
 }
 
 /* Slide up animation for TranslationSheet */
