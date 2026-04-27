@@ -1,106 +1,205 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
-import { useVoiceTranslate } from '../../hooks/useVoiceTranslate'
+import { useVoiceTranslateContext } from '../../contexts/VoiceTranslateContext'
 import { imageTranslate } from '../../services/translation'
-import { VoiceBar } from '../common/VoiceBar'
+import { TopBar } from '../common/TopBar'
 import { Viewfinder } from '../common/Viewfinder'
-import { ModeSwitcher } from '../common/ModeSwitcher'
+import { DualPill } from '../common/DualPill'
 import { PhrasesWrap } from '../common/PhrasesWrap'
 import { CameraCapture } from '../common/CameraCapture'
-import { getPhrases } from '../../services/phrases'
-import type { Phrase } from '../../types'
+import { PhotoOverlay } from '../common/PhotoOverlay'
+import { TranslationSheet } from '../common/TranslationSheet'
+import { getPhrases, translatePhrase } from '../../services/phrases'
+import { recordTranslation } from '../../services/sessions'
+import { unlockAudioContext } from '../../services/audioUnlock'
+import { SUPPORTED_LANGUAGES, type Phrase } from '../../types'
 
-interface HomeProps {
-  onManagePhrases?: () => void
-}
-
-export function Home({ onManagePhrases }: HomeProps) {
-  const { displayMode, sourceLang, targetLang, setTranslationResult } = useAppStore()
-  const { isRecording, startRecording, stopRecording } = useVoiceTranslate()
+export function Home() {
+  const {
+    languagePair,
+    capturedImage,
+    ocrRegions,
+    showTranslatedOverlay,
+    setCapturedImage,
+    setOcrRegions,
+    setShowTranslatedOverlay,
+    clearCapturedPhoto,
+    setTranslationResult,
+    setIsTranslating,
+    clearTranslationResult,
+    originalText,
+    translatedText,
+    translationAudioUrl,
+    translationType,
+    translationError,
+    isTranslating,
+    lastSourceLang,
+    lastTargetLang,
+  } = useAppStore()
+  const {
+    isLeftRecording,
+    isRightRecording,
+    startLeftRecording,
+    startRightRecording,
+    stopRecording,
+  } = useVoiceTranslateContext()
+  const isRecording = isLeftRecording || isRightRecording
   const [showCamera, setShowCamera] = useState(false)
+  const [isOcrLoading, setIsOcrLoading] = useState(false)
   const [phrases, setPhrases] = useState<Phrase[]>([])
 
   useEffect(() => {
     setPhrases(getPhrases())
   }, [])
 
-  const handleTakePhoto = () => {
-    setShowCamera(true)
-  }
+  const langName = useCallback(
+    (code: string) => SUPPORTED_LANGUAGES.find((l) => l.code === code)?.name ?? code,
+    [],
+  )
 
-  const handleCloseCamera = () => {
-    setShowCamera(false)
-  }
+  const leftLabel = langName(languagePair.B) // 外语：点左 pill 说外语
+  const rightLabel = langName(languagePair.A) // 母语：点右 pill 说母语
+
+  const handleTakePhoto = () => setShowCamera(true)
+  const handleCloseCamera = () => setShowCamera(false)
 
   const handleCapturePhoto = async (imageData: string) => {
     setShowCamera(false)
+    setCapturedImage(imageData)
+    setOcrRegions([])
+    setShowTranslatedOverlay(true)
+    setIsOcrLoading(true)
     try {
-      const result = await imageTranslate(imageData, sourceLang, targetLang)
-      setTranslationResult(result.originalText, result.translatedText, 'photo')
+      // sourceLang 传 'auto' 仅为兼容，qwen-vl-ocr advanced_recognition 自动识别多语种
+      const result = await imageTranslate(imageData, 'auto', languagePair.A)
+      if (result.regions && result.regions.length > 0) {
+        setOcrRegions(result.regions)
+      }
+      recordTranslation({
+        type: 'photo',
+        originalText: result.originalText,
+        translatedText: result.translatedText,
+        sourceLang: languagePair.B, // 拍照方向：外→母；source 语言未知时标为外语
+        targetLang: languagePair.A,
+        imageDataUrl: imageData,
+      })
     } catch (err) {
       console.error('Image translate error:', err)
+    } finally {
+      setIsOcrLoading(false)
     }
   }
 
-  const handlePressStart = useCallback(() => {
-    startRecording()
-  }, [startRecording])
+  const handlePhraseClick = useCallback(
+    async (phrase: Phrase) => {
+      // 用户手势同步上下文中解锁 AudioContext，便于后续自动播放绕过 iOS 限制
+      unlockAudioContext()
+      try {
+        const { translated, audioUrl } = await translatePhrase(phrase, languagePair.B)
+        setTranslationResult(phrase.text, translated, 'phrase', audioUrl ?? null)
+        recordTranslation({
+          type: 'phrase',
+          originalText: phrase.text,
+          translatedText: translated,
+          sourceLang: phrase.source_lang,
+          targetLang: languagePair.B,
+          audioUrl: audioUrl ?? null,
+        })
+      } catch (err) {
+        console.error('Phrase translate error:', err)
+      }
+    },
+    [languagePair.B, setTranslationResult],
+  )
 
-  const handlePressEnd = useCallback(() => {
-    stopRecording()
-  }, [stopRecording])
-
-  const handlePhraseClick = useCallback((phrase: { text: string; translation?: string }) => {
-    if (phrase.translation) {
-      setTranslationResult(phrase.text, phrase.translation, 'phrase')
+  const handleLeftToggle = useCallback(() => {
+    unlockAudioContext()
+    if (isLeftRecording) {
+      void stopRecording()
+    } else if (!isRecording) {
+      setIsTranslating(false)
+      void startLeftRecording()
     }
-  }, [setTranslationResult])
+  }, [isLeftRecording, isRecording, setIsTranslating, startLeftRecording, stopRecording])
+
+  const handleRightToggle = useCallback(() => {
+    unlockAudioContext()
+    if (isRightRecording) {
+      void stopRecording()
+    } else if (!isRecording) {
+      setIsTranslating(false)
+      void startRightRecording()
+    }
+  }, [isRightRecording, isRecording, setIsTranslating, startRightRecording, stopRecording])
+
+  const hasVoiceResult = !!originalText && (translationType === 'voice' || translationType === 'phrase')
+  const showSheet = isTranslating || !!translationError || hasVoiceResult
+
+  // 翻译方向：正在录音时依赖 pill side；收到结果后依赖 lastSourceLang/lastTargetLang
+  const activeSource = isLeftRecording
+    ? languagePair.B
+    : isRightRecording
+      ? languagePair.A
+      : lastSourceLang ?? languagePair.A
+  const activeTarget = isLeftRecording
+    ? languagePair.A
+    : isRightRecording
+      ? languagePair.B
+      : lastTargetLang ?? languagePair.B
 
   return (
-    <div className="flex flex-col min-h-full bg-[#F2EDE8]">
-      {/* Voice Bar */}
-      <VoiceBar />
+    <div className="flex flex-col h-full bg-[#F2EDE8]">
+      <TopBar />
 
-      {/* Main Content Area */}
-      <div className="flex-1 px-4 py-4">
-        {showCamera ? (
-          <CameraCapture onCapture={handleCapturePhoto} onClose={handleCloseCamera} />
-        ) : displayMode === 'photo' ? (
-          /* Photo Mode - Viewfinder */
-          <Viewfinder onClick={handleTakePhoto} />
-        ) : (
-          /* Voice Mode - Long Press Button */
-          <div className="flex flex-col items-center justify-center h-full min-h-[300px]">
-            <button
-              onMouseDown={handlePressStart}
-              onMouseUp={handlePressEnd}
-              onMouseLeave={handlePressEnd}
-              onTouchStart={handlePressStart}
-              onTouchEnd={handlePressEnd}
-              className={`w-32 h-32 rounded-full text-4xl flex items-center justify-center transition-all ${
-                isRecording
-                  ? 'bg-red-500 scale-95'
-                  : 'bg-[#D94F00] active:scale-95'
-              }`}
-            >
-              {isRecording ? '⏹' : '🎤'}
-            </button>
-            <p className="mt-4 text-sm text-[#6B6B6B]">
-              {isRecording ? '录音中...' : '按住说话'}
-            </p>
-          </div>
-        )}
+      {/* Viewfinder / PhotoOverlay / CameraCapture — 占据剩余空间 */}
+      <div className="flex-1 min-h-0 px-4 py-2">
+        <div className="w-full h-full">
+          {showCamera ? (
+            <CameraCapture onCapture={handleCapturePhoto} onClose={handleCloseCamera} />
+          ) : capturedImage ? (
+            <PhotoOverlay
+              imageDataUrl={capturedImage}
+              regions={ocrRegions}
+              showTranslated={showTranslatedOverlay}
+              isLoading={isOcrLoading}
+              onToggle={() => setShowTranslatedOverlay(!showTranslatedOverlay)}
+              onDelete={clearCapturedPhoto}
+            />
+          ) : (
+            <Viewfinder onClick={handleTakePhoto} />
+          )}
+        </div>
       </div>
 
-      {/* Mode Switcher */}
-      <div className="px-4 py-3">
-        <ModeSwitcher />
+      {/* 双 pill（按下说话） */}
+      <div className="py-2">
+        <DualPill
+          leftLabel={leftLabel}
+          rightLabel={rightLabel}
+          isLeftRecording={isLeftRecording}
+          isRightRecording={isRightRecording}
+          onLeftToggle={handleLeftToggle}
+          onRightToggle={handleRightToggle}
+        />
       </div>
 
-      {/* Phrases */}
+      {/* 常用语 */}
       <div className="px-4 pb-6">
-        <PhrasesWrap phrases={phrases} onManageClick={onManagePhrases} onPhraseClick={handlePhraseClick} />
+        <PhrasesWrap phrases={phrases} onPhraseClick={handlePhraseClick} />
       </div>
+
+      {/* 语音翻译底卡：仅在相机模式下 pill 录音 / 点 phrase 后显示 */}
+      {showSheet && (
+        <TranslationSheet
+          originalText={originalText}
+          translatedText={translatedText}
+          audioUrl={translationAudioUrl}
+          sourceLangName={langName(activeSource)}
+          targetLangName={langName(activeTarget)}
+          targetLang={activeTarget}
+          onClose={clearTranslationResult}
+        />
+      )}
     </div>
   )
 }

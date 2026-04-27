@@ -1,12 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --color-primary: #aa3bff;
-  --color-primary-bg: rgba(170, 59, 255, 0.1);
+  /* TravelTalk Design Colors */
+  --color-primary: #D94F00;
+  --color-primary-bg: rgba(217, 79, 0, 0.1);
   --color-text: #6b6375;
   --color-text-heading: #08060d;
-  --color-bg: #fff;
-  --color-border: #e5e4e7;
+  --color-bg: #F2EDE8;
+  --color-bg-secondary: #F5F0EB;
+  --color-border: #E0D9D0;
+  --color-bubble: #C5BEB6;
+  --color-btn-play: #A8B5A0;
+  --color-text-original: #888888;
+  --color-text-translated: #2D2D2D;
 
   font-family: system-ui, -apple-system, sans-serif;
   line-height: 1.5;
@@ -29,13 +35,39 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   background-color: var(--color-bg);
   color: var(--color-text);
+  overscroll-behavior: none;
+}
+
+/* 隐藏滚动条工具类 */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
 #root {
   max-width: 1280px;
   margin: 0 auto;
   padding: 1rem;
+}
+
+/* Slide up animation for TranslationSheet */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 300ms ease-out forwards;
 }

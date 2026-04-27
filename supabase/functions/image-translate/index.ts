@@ -1,252 +1,285 @@
-// Image Translation using Aliyun qwen-vl-ocr + LLM
-// OCR + Translation via qwen-vl-ocr, then LLM translation
+// Image Translation: qwen-vl-ocr advanced_recognition → per-region translations
+// v1.5: uses _shared/models.ts; adds diagnostic logging for OCR + translate.
 
-const DASHSCOPE_API_KEY = Deno.env.get('DASHSCOPE_API_KEY')!
-const OCR_ENDPOINT = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
-const LLM_ENDPOINT = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
+import {
+  DASHSCOPE,
+  DASHSCOPE_API_KEY,
+  LANG_MAP,
+} from '../_shared/models.ts'
 
 interface ImageTranslateRequest {
-  image: string // base64 encoded image
-  sourceLang: string
+  image: string // base64 encoded image (data URL prefix stripped by caller)
+  sourceLang?: string
   targetLang: string
 }
 
-// Language code mapping for OCR
-const langMap: Record<string, string> = {
-  'zh': 'Chinese',
-  'ja': 'Japanese',
-  'en': 'English',
-  'ko': 'Korean',
-  'es': 'Spanish',
-  'fr': 'French',
-  'de': 'German',
-  'it': 'Italian',
-  'pt': 'Portuguese',
-  'ru': 'Russian',
-  'ar': 'Arabic',
-  'hi': 'Hindi',
-  'th': 'Thai',
-  'vi': 'Vietnamese',
-  'id': 'Indonesian',
-  'ms': 'Malay',
-  'tl': 'Filipino',
+interface OcrWord {
+  text: string
+  location: number[] // [x1,y1, x2,y2, x3,y3, x4,y4]
 }
 
-// LLM Gateway for translation
-interface LLMConfig {
-  apiKey: string
-  model: string
+interface OcrRegion {
+  originalText: string
+  translatedText: string
+  location: number[]
 }
 
-// Get LLM configs from environment - uses DASHSCOPE_API_KEY by default
-function getLLMConfigs(): LLMConfig[] {
-  const configs: LLMConfig[] = []
+/**
+ * OCR with bounding boxes via qwen-vl-ocr advanced_recognition task.
+ */
+async function ocrWithBboxes(imageBase64: string): Promise<OcrWord[]> {
+  console.log(
+    '[OCR] Sending request, image length:',
+    imageBase64.length,
+    'prefix:',
+    imageBase64.substring(0, 60),
+  )
 
-  // Check for user-configured LLM APIs first
-  // LLM_API_1
-  const api1 = Deno.env.get('LLM_API_1')
-  const key1 = Deno.env.get('LLM_API_KEY_1')
-  const model1 = Deno.env.get('LLM_MODEL_1')
-  if (api1 && key1 && model1) {
-    configs.push({ apiKey: key1, model: model1 })
-  }
-
-  // LLM_API_2
-  const api2 = Deno.env.get('LLM_API_2')
-  const key2 = Deno.env.get('LLM_API_KEY_2')
-  const model2 = Deno.env.get('LLM_MODEL_2')
-  if (api2 && key2 && model2) {
-    configs.push({ apiKey: key2, model: model2 })
-  }
-
-  // Fallback to DASHSCOPE_API_KEY with qwen model if no custom APIs configured
-  if (configs.length === 0) {
-    configs.push({
-      apiKey: DASHSCOPE_API_KEY,
-      model: 'qwen-plus',
-    })
-  }
-
-  return configs
-}
-
-// OCR using qwen-vl-ocr
-async function ocrImage(imageBase64: string): Promise<string> {
-  const response = await fetch(OCR_ENDPOINT, {
+  const response = await fetch(DASHSCOPE.ocr.endpoint, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${DASHSCOPE_API_KEY}`,
+      Authorization: `Bearer ${DASHSCOPE_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'qwen-vl-ocr-latest',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: {
-                url: `data:image/jpeg;base64,${imageBase64}`,
-              },
-            },
-            {
-              type: 'text',
-              text: 'Please extract all text from this image. Return only the extracted text, preserving the layout as much as possible.',
-            },
-          ],
-        },
-      ],
+      model: DASHSCOPE.ocr.model,
+      input: {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { image: `data:image/jpeg;base64,${imageBase64}` },
+              { text: 'Read all texts in the image.' },
+            ],
+          },
+        ],
+      },
+      parameters: {
+        ocr_options: { task: DASHSCOPE.ocr.task },
+      },
     }),
   })
 
   if (!response.ok) {
-    throw new Error(`OCR error: ${response.status}`)
+    const errText = await response.text()
+    console.error('[OCR] HTTP error:', response.status, errText.slice(0, 300))
+    throw new Error(`OCR HTTP ${response.status}: ${errText.slice(0, 200)}`)
+  }
+
+  const data = await response.json()
+  if (data.code || data.message) {
+    console.error('[OCR] API error:', data.code, data.message)
+    throw new Error(`OCR error: ${data.message || data.code}`)
+  }
+
+  const choices = data?.output?.choices
+  if (!Array.isArray(choices) || choices.length === 0) {
+    throw new Error('OCR: no choices in response')
+  }
+
+  const content = choices[0]?.message?.content
+  let contentText = ''
+  if (typeof content === 'string') {
+    contentText = content
+  } else if (Array.isArray(content)) {
+    for (const c of content) {
+      if (typeof c?.text === 'string') {
+        contentText = c.text
+        break
+      }
+    }
+  }
+
+  if (!contentText) {
+    throw new Error('OCR: empty content')
+  }
+
+  console.log('[OCR] Raw content (first 500):', contentText.substring(0, 500))
+
+  // Try parsing JSON; fallback to plain text if it fails.
+  let parsed: { words_info?: unknown } | null = null
+  try {
+    const jsonStart = contentText.indexOf('{')
+    const jsonEnd = contentText.lastIndexOf('}')
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+      parsed = JSON.parse(contentText.slice(jsonStart, jsonEnd + 1)) as {
+        words_info?: unknown
+      }
+    }
+  } catch (_e) {
+    parsed = null
+  }
+
+  const rawWords = parsed?.words_info
+  if (Array.isArray(rawWords) && rawWords.length > 0) {
+    const out: OcrWord[] = []
+    for (const w of rawWords as Array<Record<string, unknown>>) {
+      const text = typeof w.text === 'string' ? w.text : ''
+      const loc = w.location
+      if (
+        text &&
+        Array.isArray(loc) &&
+        loc.length === 8 &&
+        loc.every((n) => typeof n === 'number')
+      ) {
+        out.push({ text, location: loc as number[] })
+      }
+    }
+    if (out.length > 0) {
+      console.log('[OCR] Parsed', out.length, 'words with bboxes')
+      return out
+    }
+  }
+
+  // Plain text fallback: split by lines, placeholder coordinates
+  const fallbackText = contentText.trim()
+  if (!fallbackText) throw new Error('OCR: no text extracted')
+  console.log('[OCR] Fallback: plain text, no bboxes')
+  return [{ text: fallbackText, location: [0, 0, 1, 0, 1, 1, 0, 1] }]
+}
+
+/**
+ * Batch translate an array of texts in one LLM call.
+ */
+async function batchTranslate(
+  texts: string[],
+  targetLang: string,
+): Promise<string[]> {
+  if (texts.length === 0) return []
+
+  const targetLangName = LANG_MAP[targetLang] || targetLang
+  const systemPrompt =
+    `You are a professional translator. Translate each of the following texts to ${targetLangName}. ` +
+    `Reply ONLY with a JSON array of strings in the same order and length. No explanations, no code fences.`
+  const userPayload = JSON.stringify(texts)
+
+  console.log(
+    '[Translate] Batch translating',
+    texts.length,
+    'texts to',
+    targetLangName,
+  )
+  console.log('[Translate] Input texts:', userPayload.substring(0, 300))
+
+  const response = await fetch(DASHSCOPE.text.endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${DASHSCOPE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: DASHSCOPE.text.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPayload },
+      ],
+      temperature: 0.2,
+    }),
+  })
+
+  if (!response.ok) {
+    const errText = await response.text()
+    console.error('[Translate] HTTP error:', response.status, errText.slice(0, 300))
+    throw new Error(`LLM HTTP ${response.status}`)
   }
 
   const data = await response.json()
   if (data.error) {
-    throw new Error(`OCR error: ${data.error.message || 'Unknown error'}`)
+    console.error('[Translate] API error:', data.error)
+    throw new Error(`LLM error: ${data.error.message ?? 'unknown'}`)
   }
 
-  // Extract text from response
-  const extractedText = data.choices?.[0]?.message?.content
-  if (!extractedText) {
-    throw new Error('No text extracted from image')
-  }
+  const content = data.choices?.[0]?.message?.content
+  if (typeof content !== 'string') throw new Error('LLM: empty content')
 
-  return extractedText
+  console.log('[Translate] Raw LLM content (first 500):', content.substring(0, 500))
+
+  const jsonStart = content.indexOf('[')
+  const jsonEnd = content.lastIndexOf(']')
+  if (jsonStart < 0 || jsonEnd <= jsonStart)
+    throw new Error('LLM: no JSON array in response')
+  const arr = JSON.parse(content.slice(jsonStart, jsonEnd + 1))
+  if (!Array.isArray(arr) || arr.length !== texts.length) {
+    throw new Error(
+      `LLM: array length mismatch (got ${Array.isArray(arr) ? arr.length : 'non-array'}, want ${texts.length})`,
+    )
+  }
+  return arr.map((s) => (typeof s === 'string' ? s : String(s)))
 }
 
-// Translate text using LLM (round-robin)
-let currentLLMIndex = 0
-
-async function translateText(
-  text: string,
-  sourceLang: string,
-  targetLang: string
-): Promise<string> {
-  const configs = getLLMConfigs()
-  if (configs.length === 0) {
-    throw new Error('No LLM API configured')
-  }
-
-  const sourceLangName = langMap[sourceLang] || sourceLang
-  const targetLangName = langMap[targetLang] || targetLang
-
-  const startIndex = currentLLMIndex
-  let lastError: Error | null = null
-
-  for (let i = 0; i < configs.length; i++) {
-    const idx = (startIndex + i) % configs.length
-    const config = configs[idx]
-
-    try {
-      const response = await fetch(LLM_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: config.model,
-          messages: [
-            {
-              role: 'system',
-              content: `You are a professional translator. Translate the following text from ${sourceLangName} to ${targetLangName}. Only return the translated text, no explanations.`,
-            },
-            {
-              role: 'user',
-              content: text,
-            },
-          ],
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`LLM error: ${response.status}`)
-      }
-
-      const data = await response.json()
-      if (data.error) {
-        throw new Error(`LLM error: ${data.error.message || 'Unknown error'}`)
-      }
-
-      const translatedText = data.choices?.[0]?.message?.content
-      if (!translatedText) {
-        throw new Error('No translation returned')
-      }
-
-      currentLLMIndex = idx
-      return translatedText
-    } catch (e) {
-      lastError = e instanceof Error ? e : new Error(String(e))
-      console.error(`LLM ${config.model} failed:`, e)
-    }
-  }
-
-  throw lastError || new Error('All LLM APIs failed')
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type',
 }
 
-// Deno serve handler
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-      },
-    })
+    return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const { image, sourceLang, targetLang } = await req.json() as ImageTranslateRequest
-
-    if (!image || !sourceLang || !targetLang) {
+    const body = (await req.json()) as ImageTranslateRequest
+    const { image, targetLang } = body
+    if (!image || !targetLang) {
       return Response.json(
-        { error: 'image, sourceLang, and targetLang are required' },
-        { status: 400 }
+        { error: 'image and targetLang are required' },
+        { status: 400, headers: corsHeaders },
       )
     }
 
-    console.log(`Image translate: ${sourceLang} -> ${targetLang}`)
+    console.log(`[FN] image-translate → ${targetLang}`)
 
-    // Step 1: OCR using qwen-vl-ocr
-    let originalText = ''
+    let words: OcrWord[] = []
     try {
-      originalText = await ocrImage(image)
-      console.log('OCR result:', originalText.substring(0, 100) + '...')
-    } catch (ocrError) {
-      console.error('OCR failed:', ocrError)
+      words = await ocrWithBboxes(image)
+      console.log(`[FN] OCR: ${words.length} regions`)
+    } catch (e) {
+      console.error('[FN] OCR failed:', e)
       return Response.json(
-        { error: 'Failed to extract text from image. Please ensure the image is clear and contains readable text.' },
-        { status: 422 }
+        { error: 'Failed to extract text from image.' },
+        { status: 422, headers: corsHeaders },
       )
     }
 
-    // Step 2: Translate using LLM
-    let translatedText = ''
+    let translated: string[] = []
     try {
-      translatedText = await translateText(originalText, sourceLang, targetLang)
-      console.log('Translation result:', translatedText.substring(0, 100) + '...')
-    } catch (translateError) {
-      console.error('Translation failed:', translateError)
+      translated = await batchTranslate(
+        words.map((w) => w.text),
+        targetLang,
+      )
+    } catch (e) {
+      console.error('[FN] Translate failed:', e)
       return Response.json(
-        { error: 'Failed to translate text. Please try again.' },
-        { status: 422 }
+        { error: 'Failed to translate text.' },
+        { status: 422, headers: corsHeaders },
       )
     }
 
-    return Response.json({
-      success: true,
-      originalText,
-      translatedText,
-    })
-  } catch (error) {
-    console.error('Image translate error:', error)
+    const regions: OcrRegion[] = words.map((w, i) => ({
+      originalText: w.text,
+      translatedText: translated[i] ?? '',
+      location: w.location,
+    }))
+
     return Response.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
+      {
+        success: true,
+        originalText: words.map((w) => w.text).join('\n'),
+        translatedText: translated.join('\n'),
+        regions,
+      },
+      { headers: corsHeaders },
+    )
+  } catch (error) {
+    console.error('[FN] image-translate error:', error)
+    return Response.json(
+      {
+        error: error instanceof Error
+          ? error.message
+          : 'Internal server error',
+      },
+      { status: 500, headers: corsHeaders },
     )
   }
 })
