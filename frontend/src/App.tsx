@@ -1,12 +1,20 @@
+import { useEffect } from 'react'
 import { useAppStore } from './stores/appStore'
 import { Home } from './components/Home/Home'
 import { Settings } from './components/Settings/Settings'
 import { History } from './components/History/History'
 import { VoiceMode } from './components/VoiceMode/VoiceMode'
 import { isSupabaseConfigured } from './services/supabase'
+import { precachePhrasesFor } from './services/phrases'
 
 function App() {
-  const { currentPage, displayMode } = useAppStore()
+  const { currentPage, displayMode, languagePair } = useAppStore()
+
+  // 启动时为当前外语预缓存常用语的译文 + TTS 音频
+  useEffect(() => {
+    void precachePhrasesFor(languagePair.B)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // 仅在挂载时运行一次
 
   if (!isSupabaseConfigured) {
     return (

@@ -25,6 +25,8 @@ export function Settings() {
     setPhrases(getPhrases())
     setNewText('')
     setShowAddForm(false)
+    // 后台为新常用语预缓存当前外语（B）的译文 + TTS 音频
+    void precachePhrasesFor(pair.B)
   }
 
   const handleDelete = (id: number) => {
