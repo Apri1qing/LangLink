@@ -44,7 +44,7 @@ export function TranslationSheet({
   const hasAutoPlayedRef = useRef(false)
   const dragStartY = useRef<number | null>(null)
   const [dragDy, setDragDy] = useState(0)
-  const { isTranslating, translationError, setTranslationError } = useAppStore()
+  const { isTranslating, translationError, setTranslationError, translationType } = useAppStore()
 
   useEffect(() => {
     if (isTranslating) {
@@ -72,6 +72,7 @@ export function TranslationSheet({
 
   /** 流式结束（isTranslating=false）后自动播放译文一次；识别/流式过程中不播放 */
   useEffect(() => {
+    if (translationType === 'phrase') return // phrase handler plays directly
     if (isTranslating || translationError || !translatedText.trim() || hasAutoPlayedRef.current) return
 
     hasAutoPlayedRef.current = true
@@ -80,7 +81,7 @@ export function TranslationSheet({
     }, 200)
 
     return () => clearTimeout(t)
-  }, [isTranslating, translationError, translatedText, targetLang, audioUrl])
+  }, [isTranslating, translationError, translatedText, targetLang, audioUrl, translationType])
 
   const handleReplay = useCallback(() => {
     void playTranslated(audioUrl, translatedText, targetLang)
@@ -112,22 +113,20 @@ export function TranslationSheet({
     }
   }
 
-  // Touch events for mobile
-  const onHandleTouchStart = (e: ReactTouchEvent<HTMLDivElement>) => {
+  // Sheet-level touch handlers — must NOT preventDefault on touchstart
+  // so taps on inner buttons still register.
+  const onSheetTouchStart = (e: ReactTouchEvent<HTMLDivElement>) => {
     dragStartY.current = e.touches[0].clientY
     setDragDy(0)
-    // Prevent default to stop page scroll immediately
-    e.preventDefault()
   }
 
-  const onHandleTouchMove = (e: ReactTouchEvent<HTMLDivElement>) => {
+  const onSheetTouchMove = (e: ReactTouchEvent<HTMLDivElement>) => {
     if (dragStartY.current == null) return
     const dy = e.touches[0].clientY - dragStartY.current
-    if (dy > 0) {
+    if (dy > 5) {
+      e.preventDefault()
       setDragDy(dy)
     }
-    // Always prevent default during drag
-    e.preventDefault()
   }
 
   const onHandleTouchEnd = (e: ReactTouchEvent<HTMLDivElement>) => {
@@ -162,19 +161,15 @@ export function TranslationSheet({
           touchAction: 'none',
           ...(dragDy ? { transform: `translateY(${Math.min(dragDy, 120)}px)` } : {}),
         }}
+        onPointerDown={onHandlePointerDown}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+        onPointerCancel={onHandlePointerUp}
+        onTouchStart={onSheetTouchStart}
+        onTouchMove={onSheetTouchMove}
+        onTouchEnd={onHandleTouchEnd}
       >
-        <div
-          role="presentation"
-          className="flex justify-center mb-3 touch-none cursor-grab active:cursor-grabbing select-none"
-          style={{ touchAction: 'none', overscrollBehavior: 'contain' }}
-          onPointerDown={onHandlePointerDown}
-          onPointerMove={onHandlePointerMove}
-          onPointerUp={onHandlePointerUp}
-          onPointerCancel={onHandlePointerUp}
-          onTouchStart={onHandleTouchStart}
-          onTouchMove={onHandleTouchMove}
-          onTouchEnd={onHandleTouchEnd}
-        >
+        <div className="flex justify-center mb-3 select-none">
           <div className="w-9 h-1 bg-[#C9C4BE] rounded-full" />
         </div>
 
@@ -220,20 +215,19 @@ export function TranslationSheet({
       {backdrop}
       <div
         className={`fixed z-30 bottom-0 left-0 right-0 mx-auto w-full max-w-[390px] bg-white rounded-t-[20px] px-6 animate-slide-up shadow-[0_-8px_32px_rgba(0,0,0,0.12)] ${sheetBottomClass}`}
-        style={{ touchAction: 'none' }}
+        style={{
+          touchAction: 'none',
+          ...(dragDy ? { transform: `translateY(${Math.min(dragDy, 120)}px)` } : {}),
+        }}
+        onPointerDown={onHandlePointerDown}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+        onPointerCancel={onHandlePointerUp}
+        onTouchStart={onSheetTouchStart}
+        onTouchMove={onSheetTouchMove}
+        onTouchEnd={onHandleTouchEnd}
       >
-        <div
-          role="presentation"
-          className="flex justify-center mb-3 touch-none cursor-grab select-none"
-          style={{ touchAction: 'none', overscrollBehavior: 'contain' }}
-          onPointerDown={onHandlePointerDown}
-          onPointerMove={onHandlePointerMove}
-          onPointerUp={onHandlePointerUp}
-          onPointerCancel={onHandlePointerUp}
-          onTouchStart={onHandleTouchStart}
-          onTouchMove={onHandleTouchMove}
-          onTouchEnd={onHandleTouchEnd}
-        >
+        <div className="flex justify-center mb-3 select-none">
           <div className="w-9 h-1 bg-[#C9C4BE] rounded-full" />
         </div>
         <p className="text-sm font-medium text-[#B42318] mb-2">翻译失败</p>
@@ -262,19 +256,15 @@ export function TranslationSheet({
         touchAction: 'none',
         ...(dragDy ? { transform: `translateY(${Math.min(dragDy, 120)}px)` } : {}),
       }}
+      onPointerDown={onHandlePointerDown}
+      onPointerMove={onHandlePointerMove}
+      onPointerUp={onHandlePointerUp}
+      onPointerCancel={onHandlePointerUp}
+      onTouchStart={onSheetTouchStart}
+      onTouchMove={onSheetTouchMove}
+      onTouchEnd={onHandleTouchEnd}
     >
-      <div
-        role="presentation"
-        className="flex justify-center mb-3 touch-none cursor-grab active:cursor-grabbing select-none"
-        style={{ touchAction: 'none', overscrollBehavior: 'contain' }}
-        onPointerDown={onHandlePointerDown}
-        onPointerMove={onHandlePointerMove}
-        onPointerUp={onHandlePointerUp}
-        onPointerCancel={onHandlePointerUp}
-        onTouchStart={onHandleTouchStart}
-        onTouchMove={onHandleTouchMove}
-        onTouchEnd={onHandleTouchEnd}
-      >
+      <div className="flex justify-center mb-3 select-none">
         <div className="w-9 h-1 bg-[#C9C4BE] rounded-full" />
       </div>
 

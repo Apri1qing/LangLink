@@ -11,7 +11,8 @@ import { PhotoOverlay } from '../common/PhotoOverlay'
 import { TranslationSheet } from '../common/TranslationSheet'
 import { getPhrases, translatePhrase } from '../../services/phrases'
 import { recordTranslation } from '../../services/sessions'
-import { unlockAudioContext } from '../../services/audioUnlock'
+import { unlockAudioContext, playAudioUrl } from '../../services/audioUnlock'
+import { speakText } from '../../hooks/useVoice'
 import { SUPPORTED_LANGUAGES, type Phrase } from '../../types'
 
 export function Home() {
@@ -96,7 +97,13 @@ export function Home() {
       unlockAudioContext()
       try {
         const { translated, audioUrl } = await translatePhrase(phrase, languagePair.B)
-        setTranslationResult(phrase.text, translated, 'phrase', audioUrl ?? null)
+        setTranslationResult(phrase.text, translated, 'phrase', audioUrl ?? null, phrase.source_lang, languagePair.B)
+        // 直接播放 — AudioContext 已在 unlockAudioContext() 手势中解锁，可绕过 iOS 自动播放限制
+        if (audioUrl) {
+          void playAudioUrl(audioUrl)
+        } else {
+          speakText(translated, languagePair.B)
+        }
         recordTranslation({
           type: 'phrase',
           originalText: phrase.text,

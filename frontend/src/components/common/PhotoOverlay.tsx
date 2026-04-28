@@ -44,7 +44,7 @@ export function PhotoOverlay({
         src={imageDataUrl}
         alt="Captured"
         onLoad={handleLoad}
-        className="w-full h-full object-contain"
+        className="w-full h-full object-cover"
       />
 
       {/* 译文气泡叠加层 */}

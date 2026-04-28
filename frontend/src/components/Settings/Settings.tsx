@@ -46,26 +46,13 @@ export function Settings() {
       <SubPageTopBar title="设置" />
 
       <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-8">
-        {/* 语言配对 */}
+        {/* 互译语言 */}
         <section>
           <h3 className="text-xs font-semibold text-[#6B6B6B] tracking-wider mb-3 uppercase">
-            语言配对
+            互译语言
           </h3>
           <div className="bg-white rounded-2xl p-4">
             <div className="flex items-center gap-3">
-              <select
-                aria-label="母语"
-                value={pair.A}
-                onChange={(e) => handlePairChange('A', e.target.value as LanguageCode)}
-                className="flex-1 px-3 py-2 border border-[#D8D2CA] rounded-lg text-sm bg-white text-[#1A1A1A]"
-              >
-                {SUPPORTED_LANGUAGES.map((l) => (
-                  <option key={l.code} value={l.code}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-              <span className="text-[#6B6B6B] text-lg" aria-hidden>↔</span>
               <select
                 aria-label="外语"
                 value={pair.B}
@@ -78,10 +65,20 @@ export function Settings() {
                   </option>
                 ))}
               </select>
+              <span className="text-[#6B6B6B] text-lg" aria-hidden>↔</span>
+              <select
+                aria-label="母语"
+                value={pair.A}
+                onChange={(e) => handlePairChange('A', e.target.value as LanguageCode)}
+                className="flex-1 px-3 py-2 border border-[#D8D2CA] rounded-lg text-sm bg-white text-[#1A1A1A]"
+              >
+                {SUPPORTED_LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
             </div>
-            <p className="mt-3 text-xs text-[#6B6B6B] leading-relaxed">
-              左侧为母语，右侧为外语。录音时自动识别语言并翻译。
-            </p>
           </div>
         </section>
 

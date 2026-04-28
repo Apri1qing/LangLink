@@ -22,45 +22,49 @@ export function ConversationBubble({ message }: ConversationBubbleProps) {
     speakText(message.translatedText, message.targetLang)
   }
 
-  const bubble = (
-    <div
-      className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-        isUser
-          ? 'bg-[#1A1A1A] text-white rounded-br-sm'
-          : 'bg-[#F2EDE8] text-[#2D2D2D] rounded-bl-sm'
-      }`}
-    >
-      <p className="text-sm font-medium whitespace-pre-wrap">{message.translatedText}</p>
-      <p className={`text-xs mt-1 ${isUser ? 'text-gray-400' : 'text-[#888888]'}`}>
-        原文：{message.originalText}
-      </p>
-    </div>
-  )
+  if (isUser) {
+    // 右侧气泡（深色），播放按钮在气泡左内侧
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[82%] rounded-2xl rounded-br-sm px-4 py-3 bg-[#1A1A1A] text-white">
+          <div className="flex items-start gap-2">
+            <button
+              type="button"
+              onClick={handlePlay}
+              aria-label="播放翻译"
+              className="mt-0.5 w-7 h-7 shrink-0 rounded-full bg-white/20 text-white text-xs flex items-center justify-center active:scale-95"
+            >
+              ▶
+            </button>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium whitespace-pre-wrap">{message.translatedText}</p>
+              <p className="text-xs mt-1 text-gray-400">原文：{message.originalText}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
-  const playBtn = (
-    <button
-      type="button"
-      onClick={handlePlay}
-      aria-label="播放翻译"
-      className="w-8 h-8 shrink-0 rounded-full bg-white border border-[#E8E3DD] text-[#2D2D2D] text-xs flex items-center justify-center active:scale-95"
-    >
-      ▶
-    </button>
-  )
-
+  // 左侧气泡（浅色），播放按钮在气泡右内侧
   return (
-    <div className={`flex items-end gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      {isUser ? (
-        <>
-          {bubble}
-          {playBtn}
-        </>
-      ) : (
-        <>
-          {playBtn}
-          {bubble}
-        </>
-      )}
+    <div className="flex justify-start">
+      <div className="max-w-[82%] rounded-2xl rounded-bl-sm px-4 py-3 bg-[#F0EDE8] text-[#2D2D2D]">
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium whitespace-pre-wrap">{message.translatedText}</p>
+            <p className="text-xs mt-1 text-[#888888]">原文：{message.originalText}</p>
+          </div>
+          <button
+            type="button"
+            onClick={handlePlay}
+            aria-label="播放翻译"
+            className="mt-0.5 w-7 h-7 shrink-0 rounded-full bg-black/10 text-[#2D2D2D] text-xs flex items-center justify-center active:scale-95"
+          >
+            ▶
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
