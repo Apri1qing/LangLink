@@ -25,6 +25,28 @@ interface OcrRegion {
 }
 
 /**
+ * Convert rotate_rect [cx, cy, w, h, angle_deg] to 8-point polygon
+ * [x1,y1, x2,y2, x3,y3, x4,y4] (top-left → clockwise).
+ */
+function rotateRectToPolygon(r: number[]): number[] | null {
+  if (r.length !== 5) return null
+  const [cx, cy, w, h, angleDeg] = r
+  const angle = (angleDeg * Math.PI) / 180
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const hw = w / 2
+  const hh = h / 2
+  // Corners relative to center (top-left, top-right, bottom-right, bottom-left)
+  const corners: [number, number][] = [
+    [-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh],
+  ]
+  return corners.flatMap(([dx, dy]) => [
+    Math.round(cx + dx * cos - dy * sin),
+    Math.round(cy + dx * sin + dy * cos),
+  ])
+}
+
+/**
  * OCR with bounding boxes via qwen-vl-ocr advanced_recognition task.
  */
 async function ocrWithBboxes(imageBase64: string): Promise<OcrWord[]> {
@@ -96,46 +118,75 @@ async function ocrWithBboxes(imageBase64: string): Promise<OcrWord[]> {
 
   console.log('[OCR] Raw content (first 500):', contentText.substring(0, 500))
 
-  // Try parsing JSON; fallback to plain text if it fails.
-  let parsed: { words_info?: unknown } | null = null
+  // Extract JSON from possible code fences (```json ... ```)
+  let jsonText = contentText
+  const fenceMatch = contentText.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (fenceMatch) jsonText = fenceMatch[1].trim()
+
+  // Try parsing JSON — handle both formats:
+  //   Format A (words_info): {"words_info": [{"text": "...", "location": [8 pts]}]}
+  //   Format B (rotate_rect): [{"text": "...", "rotate_rect": [cx,cy,w,h,angle]}]
+  let parsed: unknown = null
   try {
-    const jsonStart = contentText.indexOf('{')
-    const jsonEnd = contentText.lastIndexOf('}')
-    if (jsonStart >= 0 && jsonEnd > jsonStart) {
-      parsed = JSON.parse(contentText.slice(jsonStart, jsonEnd + 1)) as {
-        words_info?: unknown
-      }
+    // Try array first (Format B), then object (Format A)
+    const startArr = jsonText.indexOf('[')
+    const startObj = jsonText.indexOf('{')
+    if (startArr >= 0 && (startObj < 0 || startArr < startObj)) {
+      const endArr = jsonText.lastIndexOf(']')
+      if (endArr > startArr) parsed = JSON.parse(jsonText.slice(startArr, endArr + 1))
+    } else if (startObj >= 0) {
+      const endObj = jsonText.lastIndexOf('}')
+      if (endObj > startObj) parsed = JSON.parse(jsonText.slice(startObj, endObj + 1))
     }
   } catch (_e) {
     parsed = null
   }
 
-  const rawWords = parsed?.words_info
-  if (Array.isArray(rawWords) && rawWords.length > 0) {
+  // Format A: {words_info: [{text, location:[8 pts]}]}
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>
+    const rawWords = obj.words_info
+    if (Array.isArray(rawWords) && rawWords.length > 0) {
+      const out: OcrWord[] = []
+      for (const w of rawWords as Array<Record<string, unknown>>) {
+        const text = typeof w.text === 'string' ? w.text.trim() : ''
+        const loc = w.location
+        if (text && Array.isArray(loc) && loc.length === 8 && loc.every((n) => typeof n === 'number')) {
+          out.push({ text, location: loc as number[] })
+        }
+      }
+      if (out.length > 0) {
+        console.log('[OCR] Format A (words_info): parsed', out.length, 'words')
+        return out
+      }
+    }
+  }
+
+  // Format B: [{text, rotate_rect:[cx,cy,w,h,angle]}]
+  if (Array.isArray(parsed) && parsed.length > 0) {
     const out: OcrWord[] = []
-    for (const w of rawWords as Array<Record<string, unknown>>) {
-      const text = typeof w.text === 'string' ? w.text : ''
-      const loc = w.location
-      if (
-        text &&
-        Array.isArray(loc) &&
-        loc.length === 8 &&
-        loc.every((n) => typeof n === 'number')
-      ) {
-        out.push({ text, location: loc as number[] })
+    for (const w of parsed as Array<Record<string, unknown>>) {
+      const text = typeof w.text === 'string' ? w.text.trim() : ''
+      const rr = w.rotate_rect
+      if (text && Array.isArray(rr) && rr.length === 5 && rr.every((n) => typeof n === 'number')) {
+        const location = rotateRectToPolygon(rr as number[])
+        if (location) out.push({ text, location })
       }
     }
     if (out.length > 0) {
-      console.log('[OCR] Parsed', out.length, 'words with bboxes')
+      console.log('[OCR] Format B (rotate_rect): parsed', out.length, 'words')
       return out
     }
   }
 
-  // Plain text fallback: split by lines, placeholder coordinates
-  const fallbackText = contentText.trim()
-  if (!fallbackText) throw new Error('OCR: no text extracted')
-  console.log('[OCR] Fallback: plain text, no bboxes')
-  return [{ text: fallbackText, location: [0, 0, 1, 0, 1, 1, 0, 1] }]
+  // Plain text fallback: split by newlines, each line gets full-width placeholder bbox
+  const lines = contentText.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (lines.length === 0) throw new Error('OCR: no text extracted')
+  console.log('[OCR] Fallback: plain text,', lines.length, 'lines')
+  return lines.map((text, i) => ({
+    text,
+    location: [0, i * 20, 100, i * 20, 100, (i + 1) * 20, 0, (i + 1) * 20],
+  }))
 }
 
 /**
