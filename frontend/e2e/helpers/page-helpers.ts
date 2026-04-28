@@ -16,7 +16,7 @@ export async function gotoHome(page: Page): Promise<void> {
 /** Open Settings page via the TopBar gear button. */
 export async function openSettings(page: Page): Promise<void> {
   await page.getByRole('button', { name: '设置' }).click()
-  await page.waitForSelector('text=语言配对', { timeout: 5_000 })
+  await page.waitForSelector('text=互译语言', { timeout: 5_000 })
 }
 
 /** Go back to Home from a sub-page via the ← button. */
