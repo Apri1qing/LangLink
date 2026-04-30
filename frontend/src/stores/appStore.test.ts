@@ -10,6 +10,11 @@ describe('appStore', () => {
       translationError: null,
       lastSourceLang: null,
       lastTargetLang: null,
+      voiceCapturing: false,
+      voiceStreaming: false,
+      voiceTextComplete: false,
+      voiceTtsPending: false,
+      voiceTtsReady: false,
     })
   })
 
@@ -37,5 +42,43 @@ describe('appStore', () => {
     expect(state.translatedText).toBe('')
     expect(state.lastSourceLang).toBeNull()
     expect(state.lastTargetLang).toBeNull()
+  })
+
+  it('tracks capture, text completion, pending tts, and later tts readiness separately', () => {
+    const store = useAppStore.getState()
+
+    store.setVoiceCaptureActive(true, 'zh', 'ja')
+    expect(useAppStore.getState()).toMatchObject({
+      voiceCapturing: true,
+      voiceStreaming: true,
+      voiceTextComplete: false,
+      voiceTtsPending: false,
+      voiceTtsReady: false,
+      isTranslating: true,
+      lastSourceLang: 'zh',
+      lastTargetLang: 'ja',
+    })
+
+    store.setVoiceTextComplete('你好', 'こんにちは', 'zh', 'ja')
+    expect(useAppStore.getState()).toMatchObject({
+      originalText: '你好',
+      translatedText: 'こんにちは',
+      voiceCapturing: false,
+      voiceStreaming: false,
+      voiceTextComplete: true,
+      voiceTtsPending: true,
+      voiceTtsReady: false,
+      translationAudioUrl: null,
+      isTranslating: true,
+    })
+
+    store.setVoiceTtsReady('https://audio.example/hello.mp3')
+    expect(useAppStore.getState()).toMatchObject({
+      voiceTextComplete: true,
+      voiceTtsPending: false,
+      voiceTtsReady: true,
+      translationAudioUrl: 'https://audio.example/hello.mp3',
+      isTranslating: false,
+    })
   })
 })

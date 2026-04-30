@@ -119,6 +119,15 @@ export interface VoiceTranslateRequestOptions {
 
 const DEFAULT_VOICE_TIMEOUT_MS = 180_000
 
+export type VoiceTranslateStreamEvent =
+  | { type: 'started' }
+  | { type: 'text_complete'; success: true; originalText: string; translatedText: string; ttsStatus: 'pending' | 'skipped' }
+  | { type: 'tts_complete'; audioUrl: string }
+  | { type: 'tts_error'; error: string }
+  | { type: 'complete'; success: true; originalText: string; translatedText: string; audioUrl?: string; ttsError?: string }
+
+type VoiceTranslateStreamEventCallback = (event: VoiceTranslateStreamEvent) => void
+
 function mergeAbortSignals(outer: AbortSignal | undefined, timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
   const c = new AbortController()
   const tid = window.setTimeout(() => c.abort(), timeoutMs)
@@ -296,6 +305,116 @@ async function* readNdjsonStream(
   }
 }
 
+function parseVoiceStreamEvent(ev: Record<string, unknown>): VoiceTranslateStreamEvent | null {
+  switch (ev.type) {
+    case 'started':
+      return { type: 'started' }
+    case 'text_complete': {
+      if (ev.success !== true) {
+        throw new Error(String(ev.error ?? 'Voice translation failed'))
+      }
+      return {
+        type: 'text_complete',
+        success: true,
+        originalText: String(ev.originalText ?? ''),
+        translatedText: String(ev.translatedText ?? ''),
+        ttsStatus: ev.ttsStatus === 'skipped' ? 'skipped' : 'pending',
+      }
+    }
+    case 'tts_complete':
+      return {
+        type: 'tts_complete',
+        audioUrl: typeof ev.audioUrl === 'string' ? ev.audioUrl : '',
+      }
+    case 'tts_error':
+      return {
+        type: 'tts_error',
+        error: String(ev.error ?? 'TTS failed'),
+      }
+    case 'complete': {
+      if (ev.success === true) {
+        return {
+          type: 'complete',
+          success: true,
+          originalText: String(ev.originalText ?? ''),
+          translatedText: String(ev.translatedText ?? ''),
+          audioUrl: typeof ev.audioUrl === 'string' ? ev.audioUrl : undefined,
+          ttsError: typeof ev.ttsError === 'string' ? ev.ttsError : undefined,
+        }
+      }
+      throw new Error(String(ev.error ?? 'Voice translation failed'))
+    }
+    default:
+      return null
+  }
+}
+
+function applyVoiceStreamEvent(
+  final: VoiceTranslateResponse | null,
+  event: VoiceTranslateStreamEvent
+): VoiceTranslateResponse | null {
+  if (event.type === 'text_complete') {
+    return {
+      originalText: event.originalText,
+      translatedText: event.translatedText,
+    }
+  }
+  if (event.type === 'tts_complete') {
+    return {
+      originalText: final?.originalText ?? '',
+      translatedText: final?.translatedText ?? '',
+      ...(event.audioUrl ? { audioUrl: event.audioUrl } : {}),
+    }
+  }
+  if (event.type === 'tts_error') {
+    return {
+      originalText: final?.originalText ?? '',
+      translatedText: final?.translatedText ?? '',
+      ttsError: event.error,
+    }
+  }
+  if (event.type === 'complete') {
+    return {
+      originalText: event.originalText,
+      translatedText: event.translatedText,
+      ...(event.audioUrl ? { audioUrl: event.audioUrl } : {}),
+      ...(event.ttsError ? { ttsError: event.ttsError } : {}),
+    }
+  }
+  return final
+}
+
+async function readVoiceNdjsonResult(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal | undefined,
+  onDelta?: (p: { originalText: string; translatedText: string }) => void,
+  onEvent?: VoiceTranslateStreamEventCallback
+): Promise<VoiceTranslateResponse> {
+  let final: VoiceTranslateResponse | null = null
+
+  for await (const ev of readNdjsonStream(body, signal)) {
+    if (ev.type === 'delta') {
+      if (onDelta) {
+        onDelta({
+          originalText: String(ev.originalText ?? ''),
+          translatedText: String(ev.translatedText ?? ''),
+        })
+      }
+      continue
+    }
+
+    const event = parseVoiceStreamEvent(ev)
+    if (!event) continue
+    onEvent?.(event)
+    final = applyVoiceStreamEvent(final, event)
+  }
+
+  if (!final) {
+    throw new Error('Stream ended without complete event')
+  }
+  return final
+}
+
 /**
  * 浏览器 ReadableStream PCM → Edge octet-stream → Gummy（边说边出 delta）
  */
@@ -304,7 +423,8 @@ export async function voiceTranslatePcmRequestStream(
   sourceLang: LanguageCode,
   targetLang: LanguageCode,
   signal: AbortSignal | undefined,
-  onDelta?: (p: { originalText: string; translatedText: string }) => void
+  onDelta?: (p: { originalText: string; translatedText: string }) => void,
+  onEvent?: VoiceTranslateStreamEventCallback
 ): Promise<VoiceTranslateResponse> {
   if (!FUNCTIONS_URL) {
     throw new Error('Edge Functions not configured')
@@ -337,31 +457,7 @@ export async function voiceTranslatePcmRequestStream(
       throw new Error('No response body')
     }
 
-    let final: VoiceTranslateResponse | null = null
-    for await (const ev of readNdjsonStream(response.body, mergedSignal)) {
-      if (ev.type === 'delta' && onDelta) {
-        onDelta({
-          originalText: String(ev.originalText ?? ''),
-          translatedText: String(ev.translatedText ?? ''),
-        })
-      }
-      if (ev.type === 'complete') {
-        if (ev.success === true) {
-          final = {
-            originalText: String(ev.originalText ?? ''),
-            translatedText: String(ev.translatedText ?? ''),
-            audioUrl: typeof ev.audioUrl === 'string' ? ev.audioUrl : undefined,
-          }
-        } else {
-          throw new Error(String(ev.error ?? 'Voice translation failed'))
-        }
-      }
-    }
-
-    if (!final) {
-      throw new Error('Stream ended without complete event')
-    }
-    return final
+    return await readVoiceNdjsonResult(response.body, mergedSignal, onDelta, onEvent)
   } finally {
     cleanup()
   }
@@ -377,7 +473,8 @@ async function voiceTranslatePcmStreaming(
   targetLang: LanguageCode,
   format: string,
   signal: AbortSignal | undefined,
-  onDelta?: (p: { originalText: string; translatedText: string }) => void
+  onDelta?: (p: { originalText: string; translatedText: string }) => void,
+  onEvent?: VoiceTranslateStreamEventCallback
 ): Promise<VoiceTranslateResponse> {
   if (!FUNCTIONS_URL) {
     throw new Error('Edge Functions not configured')
@@ -416,31 +513,7 @@ async function voiceTranslatePcmStreaming(
       throw new Error('No response body')
     }
 
-    let final: VoiceTranslateResponse | null = null
-    for await (const ev of readNdjsonStream(response.body, mergedSignal)) {
-      if (ev.type === 'delta' && onDelta) {
-        onDelta({
-          originalText: String(ev.originalText ?? ''),
-          translatedText: String(ev.translatedText ?? ''),
-        })
-      }
-      if (ev.type === 'complete') {
-        if (ev.success === true) {
-          final = {
-            originalText: String(ev.originalText ?? ''),
-            translatedText: String(ev.translatedText ?? ''),
-            audioUrl: typeof ev.audioUrl === 'string' ? ev.audioUrl : undefined,
-          }
-        } else {
-          throw new Error(String(ev.error ?? 'Voice translation failed'))
-        }
-      }
-    }
-
-    if (!final) {
-      throw new Error('Stream ended without complete event')
-    }
-    return final
+    return await readVoiceNdjsonResult(response.body, mergedSignal, onDelta, onEvent)
   } finally {
     cleanup()
   }
@@ -455,9 +528,10 @@ export async function voiceTranslateFromPcm(
   targetLang: LanguageCode,
   format: string,
   signal?: AbortSignal,
-  onDelta?: (p: { originalText: string; translatedText: string }) => void
+  onDelta?: (p: { originalText: string; translatedText: string }) => void,
+  onEvent?: VoiceTranslateStreamEventCallback
 ): Promise<VoiceTranslateResponse> {
-  return voiceTranslatePcmStreaming(pcm, sourceLang, targetLang, format, signal, onDelta)
+  return voiceTranslatePcmStreaming(pcm, sourceLang, targetLang, format, signal, onDelta, onEvent)
 }
 
 // Image translation API（v1.4: targetLang 固定为 pair.A 由调用方决定；sourceLang 透传但后端不再特别处理）

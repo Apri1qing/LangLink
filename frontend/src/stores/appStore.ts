@@ -42,9 +42,16 @@ export interface AppState {
 
   /** Last voice/image translate error for UI */
   translationError: string | null
+  /** Non-fatal TTS failure after voice text completed; text remains usable for browser speech fallback. */
+  voiceTtsError: string | null
 
   // Loading state
   isTranslating: boolean
+  voiceCapturing: boolean
+  voiceStreaming: boolean
+  voiceTextComplete: boolean
+  voiceTtsPending: boolean
+  voiceTtsReady: boolean
 
   // Voice Mode — current session's messages (render source)
   messages: ConversationMessage[]
@@ -78,6 +85,20 @@ export interface AppState {
     sourceLang?: LanguageCode,
     targetLang?: LanguageCode
   ) => void
+  setVoiceCaptureActive: (
+    active: boolean,
+    sourceLang?: LanguageCode,
+    targetLang?: LanguageCode
+  ) => void
+  setVoiceStreamStarted: (sourceLang?: LanguageCode, targetLang?: LanguageCode) => void
+  setVoiceTextComplete: (
+    original: string,
+    translated: string,
+    sourceLang?: LanguageCode,
+    targetLang?: LanguageCode
+  ) => void
+  setVoiceTtsReady: (audioUrl?: string | null) => void
+  setVoiceTtsError: (message: string) => void
   clearTranslationResult: () => void
   setTranslationError: (message: string | null) => void
   setIsTranslating: (value: boolean) => void
@@ -108,7 +129,13 @@ export const useAppStore = create<AppState>()(
   lastSourceLang: null,
   lastTargetLang: null,
   translationError: null,
+  voiceTtsError: null,
   isTranslating: false,
+  voiceCapturing: false,
+  voiceStreaming: false,
+  voiceTextComplete: false,
+  voiceTtsPending: false,
+  voiceTtsReady: false,
   messages: [],
   currentSessionId: null,
   capturedImage: null,
@@ -146,7 +173,13 @@ export const useAppStore = create<AppState>()(
       translationType: type,
       translationAudioUrl: audioUrl ?? null,
       translationError: null,
+      voiceTtsError: null,
       isTranslating: false,
+      voiceCapturing: false,
+      voiceStreaming: false,
+      voiceTextComplete: true,
+      voiceTtsPending: false,
+      voiceTtsReady: !!audioUrl,
       lastSourceLang: sourceLang ?? state.lastSourceLang,
       lastTargetLang: targetLang ?? state.lastTargetLang,
     })),
@@ -157,11 +190,82 @@ export const useAppStore = create<AppState>()(
       translatedText: translated,
       translationType: 'voice',
       translationError: null,
+      voiceTtsError: null,
+      translationAudioUrl: null,
+      isTranslating: true,
+      voiceStreaming: true,
+      voiceTextComplete: false,
+      voiceTtsPending: false,
+      voiceTtsReady: false,
+      lastSourceLang: sourceLang ?? state.lastSourceLang,
+      lastTargetLang: targetLang ?? state.lastTargetLang,
+    })),
+
+  setVoiceCaptureActive: (active, sourceLang, targetLang) =>
+    set((state) => ({
+      voiceCapturing: active,
+      voiceStreaming: active ? true : state.voiceStreaming,
+      voiceTextComplete: active ? false : state.voiceTextComplete,
+      voiceTtsPending: active ? false : state.voiceTtsPending,
+      voiceTtsReady: active ? false : state.voiceTtsReady,
+      voiceTtsError: active ? null : state.voiceTtsError,
+      translationType: 'voice',
+      translationError: active ? null : state.translationError,
+      translationAudioUrl: active ? null : state.translationAudioUrl,
+      isTranslating: active ? true : state.isTranslating,
+      lastSourceLang: sourceLang ?? state.lastSourceLang,
+      lastTargetLang: targetLang ?? state.lastTargetLang,
+    })),
+
+  setVoiceStreamStarted: (sourceLang, targetLang) =>
+    set((state) => ({
+      voiceStreaming: true,
+      voiceTextComplete: false,
+      voiceTtsPending: false,
+      voiceTtsReady: false,
+      voiceTtsError: null,
+      translationType: 'voice',
+      translationError: null,
       translationAudioUrl: null,
       isTranslating: true,
       lastSourceLang: sourceLang ?? state.lastSourceLang,
       lastTargetLang: targetLang ?? state.lastTargetLang,
     })),
+
+  setVoiceTextComplete: (original, translated, sourceLang, targetLang) =>
+    set((state) => ({
+      originalText: original,
+      translatedText: translated,
+      translationType: 'voice',
+      translationAudioUrl: null,
+      translationError: null,
+      voiceTtsError: null,
+      voiceCapturing: false,
+      voiceStreaming: false,
+      voiceTextComplete: true,
+      voiceTtsPending: true,
+      voiceTtsReady: false,
+      isTranslating: true,
+      lastSourceLang: sourceLang ?? state.lastSourceLang,
+      lastTargetLang: targetLang ?? state.lastTargetLang,
+    })),
+
+  setVoiceTtsReady: (audioUrl = null) =>
+    set({
+      translationAudioUrl: audioUrl ?? null,
+      voiceTtsError: null,
+      voiceTtsPending: false,
+      voiceTtsReady: true,
+      isTranslating: false,
+    }),
+
+  setVoiceTtsError: (message) =>
+    set({
+      voiceTtsError: message,
+      voiceTtsPending: false,
+      voiceTtsReady: false,
+      isTranslating: false,
+    }),
 
   clearTranslationResult: () =>
     set({
@@ -170,14 +274,41 @@ export const useAppStore = create<AppState>()(
       translationType: 'voice',
       translationAudioUrl: null,
       translationError: null,
+      voiceTtsError: null,
       isTranslating: false,
+      voiceCapturing: false,
+      voiceStreaming: false,
+      voiceTextComplete: false,
+      voiceTtsPending: false,
+      voiceTtsReady: false,
       lastSourceLang: null,
       lastTargetLang: null,
     }),
 
-  setTranslationError: (message) => set({ translationError: message }),
+  setTranslationError: (message) =>
+    set({
+      translationError: message,
+      ...(message
+        ? {
+            isTranslating: false,
+            voiceCapturing: false,
+            voiceStreaming: false,
+            voiceTtsPending: false,
+          }
+        : {}),
+    }),
 
-  setIsTranslating: (value) => set({ isTranslating: value }),
+  setIsTranslating: (value) =>
+    set({
+      isTranslating: value,
+      ...(value
+        ? {}
+        : {
+            voiceCapturing: false,
+            voiceStreaming: false,
+            voiceTtsPending: false,
+          }),
+    }),
 
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
 

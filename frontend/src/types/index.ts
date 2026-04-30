@@ -25,6 +25,8 @@ export interface VoiceTranslateResponse {
   originalText: string
   translatedText: string
   audioUrl?: string
+  /** Non-fatal TTS failure after text translation completed. UI may fallback to browser speech. */
+  ttsError?: string
 }
 
 export interface ImageTranslateRequest {

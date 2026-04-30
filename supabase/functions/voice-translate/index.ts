@@ -580,6 +580,7 @@ Deno.serve(async (req) => {
 
     return ndjsonResponse(async (send) => {
       try {
+        send({ type: 'started' })
         const result = await speechToTextAndTranslateFromStream(
           reader,
           sourceLang,
@@ -595,12 +596,31 @@ Deno.serve(async (req) => {
           forceSourceLang,
         ) as { transcription: string; translation: string; rawMessages?: string[] }
 
+        send({
+          type: 'text_complete',
+          success: true,
+          originalText: result.transcription,
+          translatedText: result.translation,
+          ttsStatus: skipTts ? 'skipped' : 'pending',
+          ...(debug && result.rawMessages ? { rawMessages: result.rawMessages } : {}),
+        })
+
         let audioUrl = ''
+        let ttsError = ''
         if (!skipTts) {
           try {
             audioUrl = await callTTS(result.translation, targetLang)
+            send({
+              type: 'tts_complete',
+              audioUrl,
+            })
           } catch (ttsErr) {
             console.error('[FN] TTS failed (non-fatal):', ttsErr)
+            ttsError = ttsErr instanceof Error ? ttsErr.message : 'TTS failed'
+            send({
+              type: 'tts_error',
+              error: ttsError,
+            })
           }
         }
 
@@ -610,6 +630,7 @@ Deno.serve(async (req) => {
           originalText: result.transcription,
           translatedText: result.translation,
           audioUrl,
+          ...(ttsError ? { ttsError } : {}),
           ...(debug && result.rawMessages ? { rawMessages: result.rawMessages } : {}),
         })
       } catch (error) {
@@ -675,6 +696,7 @@ Deno.serve(async (req) => {
     if (stream === true) {
       return ndjsonResponse(async (send) => {
         try {
+          send({ type: 'started' })
           const result = await speechToTextAndTranslate(
             audioData,
             sourceLang,
@@ -690,12 +712,31 @@ Deno.serve(async (req) => {
             forceSourceLangJson,
           ) as { transcription: string; translation: string; rawMessages?: string[] }
 
+          send({
+            type: 'text_complete',
+            success: true,
+            originalText: result.transcription,
+            translatedText: result.translation,
+            ttsStatus: skipTts ? 'skipped' : 'pending',
+            ...(debug && result.rawMessages ? { rawMessages: result.rawMessages } : {}),
+          })
+
           let audioUrl = ''
+          let ttsError = ''
           if (!skipTts) {
             try {
               audioUrl = await callTTS(result.translation, targetLang)
+              send({
+                type: 'tts_complete',
+                audioUrl,
+              })
             } catch (ttsErr) {
               console.error('[FN] TTS failed (non-fatal):', ttsErr)
+              ttsError = ttsErr instanceof Error ? ttsErr.message : 'TTS failed'
+              send({
+                type: 'tts_error',
+                error: ttsError,
+              })
             }
           }
 
@@ -705,6 +746,7 @@ Deno.serve(async (req) => {
             originalText: result.transcription,
             translatedText: result.translation,
             audioUrl,
+            ...(ttsError ? { ttsError } : {}),
             ...(debug && result.rawMessages ? { rawMessages: result.rawMessages } : {}),
           })
         } catch (error) {

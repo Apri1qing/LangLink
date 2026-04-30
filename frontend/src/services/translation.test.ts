@@ -27,6 +27,7 @@ describe('translation service', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.resetModules()
+    vi.stubEnv('VITE_SUPABASE_FUNCTIONS_URL', 'http://edge.test/functions')
   })
 
   describe('getCacheKey', () => {
@@ -83,6 +84,89 @@ describe('translation service', () => {
     it('should be a function', async () => {
       const { supportsRequestBodyStream } = await import('./translation')
       expect(typeof supportsRequestBodyStream).toBe('function')
+    })
+  })
+
+  describe('voice NDJSON stream contract', () => {
+    const ndjson = (events: Record<string, unknown>[]) => {
+      const encoder = new TextEncoder()
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const event of events) {
+            controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
+          }
+          controller.close()
+        },
+      })
+    }
+
+    it('resolves text_complete and later patches audio from tts_complete without requiring legacy complete', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(ndjson([
+        { type: 'started' },
+        { type: 'delta', originalText: '你', translatedText: 'こ' },
+        {
+          type: 'text_complete',
+          success: true,
+          originalText: '你好',
+          translatedText: 'こんにちは',
+          ttsStatus: 'pending',
+        },
+        { type: 'tts_complete', audioUrl: 'https://audio.example/hello.mp3' },
+      ]), { status: 200 })))
+
+      const { voiceTranslatePcmRequestStream } = await import('./translation')
+      const deltas: Array<{ originalText: string; translatedText: string }> = []
+      const events: Record<string, unknown>[] = []
+
+      const result = await voiceTranslatePcmRequestStream(
+        new ReadableStream<Uint8Array>(),
+        'zh',
+        'ja',
+        undefined,
+        (delta) => deltas.push(delta),
+        (event) => events.push(event as unknown as Record<string, unknown>),
+      )
+
+      expect(deltas).toEqual([{ originalText: '你', translatedText: 'こ' }])
+      expect(events.map((event) => event.type)).toEqual(['started', 'text_complete', 'tts_complete'])
+      expect(result).toEqual({
+        originalText: '你好',
+        translatedText: 'こんにちは',
+        audioUrl: 'https://audio.example/hello.mp3',
+      })
+    })
+
+    it('keeps completed text when tts_error arrives so UI can fallback to browser speech', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(ndjson([
+        {
+          type: 'text_complete',
+          success: true,
+          originalText: '多少钱',
+          translatedText: 'いくらですか',
+          ttsStatus: 'pending',
+        },
+        { type: 'tts_error', error: 'TTS quota exceeded' },
+      ]), { status: 200 })))
+
+      const { voiceTranslateFromPcm } = await import('./translation')
+      const events: Record<string, unknown>[] = []
+
+      const result = await voiceTranslateFromPcm(
+        new Uint8Array([1, 2, 3]),
+        'zh',
+        'ja',
+        'audio/pcm',
+        undefined,
+        undefined,
+        (event) => events.push(event as unknown as Record<string, unknown>),
+      )
+
+      expect(events.at(-1)).toMatchObject({ type: 'tts_error', error: 'TTS quota exceeded' })
+      expect(result).toEqual({
+        originalText: '多少钱',
+        translatedText: 'いくらですか',
+        ttsError: 'TTS quota exceeded',
+      })
     })
   })
 

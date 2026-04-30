@@ -6,6 +6,7 @@ import { useAppStore } from '../stores/appStore'
 import {
   supportsRequestBodyStream,
   translateText,
+  type VoiceTranslateStreamEvent,
   voiceTtsOnly,
   voiceTranslateFromPcm,
   voiceTranslatePcmRequestStream,
@@ -47,6 +48,7 @@ async function completeVoiceResult(
       originalText,
       translatedText,
       ...(audioUrl ? { audioUrl } : {}),
+      ...(result.ttsError ? { ttsError: result.ttsError } : {}),
     }
   }
 
@@ -65,8 +67,29 @@ async function completeVoiceResult(
   }
 }
 
+function makeVoiceStreamEventHandler(sourceLang: LanguageCode, targetLang: LanguageCode) {
+  return (event: VoiceTranslateStreamEvent) => {
+    const store = useAppStore.getState()
+    if (event.type === 'started') {
+      store.setVoiceStreamStarted(sourceLang, targetLang)
+      return
+    }
+    if (event.type === 'text_complete') {
+      store.setVoiceTextComplete(event.originalText, event.translatedText, sourceLang, targetLang)
+      return
+    }
+    if (event.type === 'tts_complete') {
+      store.setVoiceTtsReady(event.audioUrl)
+      return
+    }
+    if (event.type === 'tts_error') {
+      store.setVoiceTtsError(event.error)
+    }
+  }
+}
+
 export function useVoiceTranslate() {
-  const { setVoiceTranslationProgress } = useAppStore()
+  const { setVoiceCaptureActive } = useAppStore()
   const [recordingSide, setRecordingSide] = useState<PillSide | null>(null)
   const recordingSideRef = useRef<PillSide | null>(null)
   const pendingLangsRef = useRef<{ source: LanguageCode; target: LanguageCode } | null>(null)
@@ -103,6 +126,7 @@ export function useVoiceTranslate() {
       setErr(null)
       setVoiceTranslationProgress('', '', langs.source, langs.target)
       const pcmData = await convertToPCM(blob)
+      const handleEvent = makeVoiceStreamEventHandler(langs.source, langs.target)
       const result = await voiceTranslateFromPcm(
         pcmData,
         langs.source,
@@ -110,6 +134,7 @@ export function useVoiceTranslate() {
         'audio/pcm',
         undefined,
         (d) => setVoiceTranslationProgress(d.originalText, d.translatedText, langs.source, langs.target),
+        handleEvent,
       )
 
       const completed = await completeVoiceResult(result, langs.source, langs.target)
@@ -158,10 +183,10 @@ export function useVoiceTranslate() {
 
   const startPcmStreamingTranslate = useCallback(
     async (source: LanguageCode, target: LanguageCode) => {
-      const { setVoiceTranslationProgress, setTranslationError: setErr } = useAppStore.getState()
+      const { setVoiceCaptureActive, setTranslationError: setErr } = useAppStore.getState()
 
       setErr(null)
-      setVoiceTranslationProgress('', '', source, target)
+      setVoiceCaptureActive(true, source, target)
       setPcmActive(true)
 
       const { stream, enqueue, close } = createPcmReadableStream()
@@ -172,7 +197,8 @@ export function useVoiceTranslate() {
         source,
         target,
         ac.signal,
-        (d) => setVoiceTranslationProgress(d.originalText, d.translatedText, source, target),
+        (d) => useAppStore.getState().setVoiceTranslationProgress(d.originalText, d.translatedText, source, target),
+        makeVoiceStreamEventHandler(source, target),
       )
 
       const { stop: stopMic, ok } = await startPcmFromMicrophone(
@@ -216,14 +242,14 @@ export function useVoiceTranslate() {
       recordingSideRef.current = side
       pendingLangsRef.current = { source, target }
       setRecordingSide(side)
-      setVoiceTranslationProgress('', '', source, target)
+      setVoiceCaptureActive(true, source, target)
       if (supportsRequestBodyStream()) {
         await startPcmStreamingTranslate(source, target)
       } else {
         await startRecording()
       }
     },
-    [setVoiceTranslationProgress, startRecording, startPcmStreamingTranslate],
+    [setVoiceCaptureActive, startRecording, startPcmStreamingTranslate],
   )
 
   const startLeftRecording = useCallback(() => startForSide('left'), [startForSide])
@@ -241,6 +267,8 @@ export function useVoiceTranslate() {
         console.warn('stopMic', e)
       }
       close()
+      setPcmActive(false)
+      useAppStore.getState().setVoiceCaptureActive(false, sourceLang, targetLang)
 
       const {
         setTranslationResult: putResult,
@@ -248,47 +276,51 @@ export function useVoiceTranslate() {
         setIsTranslating: setTrans,
       } = useAppStore.getState()
 
-      try {
-        const result = await fetchPromise
-        const completed = await completeVoiceResult(result, sourceLang, targetLang)
-        putResult(
-          completed.originalText || '',
-          completed.translatedText || '',
-          'voice',
-          completed.audioUrl || null,
-          sourceLang,
-          targetLang,
-        )
-        recordTranslation({
-          type: 'voice',
-          originalText: completed.originalText || '',
-          translatedText: completed.translatedText || '',
-          sourceLang,
-          targetLang,
-          audioUrl: completed.audioUrl || null,
+      void fetchPromise
+        .then(async (result) => {
+          const completed = await completeVoiceResult(result, sourceLang, targetLang)
+          putResult(
+            completed.originalText || '',
+            completed.translatedText || '',
+            'voice',
+            completed.audioUrl || null,
+            sourceLang,
+            targetLang,
+          )
+          if (completed.ttsError) {
+            useAppStore.getState().setVoiceTtsError(completed.ttsError)
+          }
+          recordTranslation({
+            type: 'voice',
+            originalText: completed.originalText || '',
+            translatedText: completed.translatedText || '',
+            sourceLang,
+            targetLang,
+            audioUrl: completed.audioUrl || null,
+          })
         })
-      } catch (err) {
-        if (ac.signal.aborted) {
-          setTrans(false)
-        } else {
-          console.error('Voice translation error:', err)
-          const msg = err instanceof Error ? err.message : '语音翻译失败'
-          setErr(msg)
-          setTrans(false)
-        }
-      } finally {
-        setPcmActive(false)
-        recordingSideRef.current = null
-        pendingLangsRef.current = null
-        setRecordingSide(null)
-      }
+        .catch((err) => {
+          if (ac.signal.aborted) {
+            setTrans(false)
+          } else {
+            console.error('Voice translation error:', err)
+            const msg = err instanceof Error ? err.message : '语音翻译失败'
+            setErr(msg)
+            setTrans(false)
+          }
+        })
+        .finally(() => {
+          recordingSideRef.current = null
+          pendingLangsRef.current = null
+          setRecordingSide(null)
+        })
       return
     }
 
     if (!isRecording) return
     useAppStore.getState().setTranslationError(null)
     const langs = pendingLangsRef.current
-    setVoiceTranslationProgress('', '', langs?.source, langs?.target)
+    useAppStore.getState().setVoiceCaptureActive(false, langs?.source, langs?.target)
     const ended = await stopRecording()
     if (!ended) {
       useAppStore.getState().setIsTranslating(false)
@@ -296,7 +328,7 @@ export function useVoiceTranslate() {
       pendingLangsRef.current = null
       setRecordingSide(null)
     }
-  }, [isRecording, stopRecording, setVoiceTranslationProgress])
+  }, [isRecording, stopRecording])
 
   const combinedRecording = isRecording || pcmActive
   const combinedDuration = pcmActive ? pcmDuration : duration
