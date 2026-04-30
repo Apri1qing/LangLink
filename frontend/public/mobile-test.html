@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TravelTalk Mobile Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #F2EDE8;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .test-btn {
+            width: 100%;
+            padding: 20px;
+            margin: 10px 0;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 500;
+            background: #1A1A1A;
+            color: white;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .test-btn:active {
+            transform: scale(0.98);
+            background: #D94F00;
+        }
+        .test-btn.recording {
+            background: #D94F00;
+        }
+        .log {
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 12px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .video-container {
+            width: 100%;
+            aspect-ratio: 1;
+            background: black;
+            border-radius: 16px;
+            overflow: hidden;
+            margin: 20px 0;
+            display: none;
+        }
+        .video-container.active {
+            display: block;
+        }
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+    </style>
+</head>
+<body>
+    <h2 style="margin-bottom: 20px; font-size: 18px;">TravelTalk 移动端诊断</h2>
+    
+    <button class="test-btn" id="micBtn">🎙 测试长按录音</button>
+    <button class="test-btn" id="cameraBtn">📷 测试相机</button>
+    <button class="test-btn" id="ttsBtn">🔊 测试语音播放</button>
+    
+    <div class="video-container" id="videoContainer">
+        <video id="video" autoplay playsinline muted></video>
+    </div>
+    
+    <div class="log" id="log">点击按钮开始测试...</div>
+
+    <script>
+        const log = document.getElementById('log');
+        function addLog(msg) {
+            const time = new Date().toLocaleTimeString();
+            log.textContent += `[${time}] ${msg}\n`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // 长按录音测试
+        const micBtn = document.getElementById('micBtn');
+        let micTimer = null;
+        let isRecording = false;
+
+        function startMicTest() {
+            addLog('触摸开始 - 启动长按计时');
+            micBtn.classList.add('recording');
+            micTimer = setTimeout(() => {
+                isRecording = true;
+                addLog('✅ 长按触发成功！录音中...');
+                micBtn.textContent = '🔴 录音中 (松开结束)';
+            }, 300);
+        }
+
+        function endMicTest() {
+            clearTimeout(micTimer);
+            micBtn.classList.remove('recording');
+            if (isRecording) {
+                addLog('触摸结束 - 录音停止');
+                micBtn.textContent = '🎙 测试长按录音';
+                isRecording = false;
+            } else {
+                addLog('❌ 短按 - 未达到长按阈值');
+            }
+        }
+
+        // 同时支持 pointer 和 touch 事件
+        micBtn.addEventListener('pointerdown', startMicTest);
+        micBtn.addEventListener('pointerup', endMicTest);
+        micBtn.addEventListener('pointercancel', endMicTest);
+        micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startMicTest(); });
+        micBtn.addEventListener('touchend', (e) => { e.preventDefault(); endMicTest(); });
+
+        // 相机测试
+        const cameraBtn = document.getElementById('cameraBtn');
+        const videoContainer = document.getElementById('videoContainer');
+        const video = document.getElementById('video');
+        let stream = null;
+
+        cameraBtn.addEventListener('click', async () => {
+            addLog('请求相机权限...');
+            try {
+                if (stream) {
+                    stream.getTracks().forEach(t => t.stop());
+                }
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' },
+                    audio: false
+                });
+                video.srcObject = stream;
+                videoContainer.classList.add('active');
+                addLog('✅ 相机权限获取成功，正在播放...');
+            } catch (err) {
+                addLog(`❌ 相机错误: ${err.name} - ${err.message}`);
+            }
+        });
+
+        // TTS 测试
+        const ttsBtn = document.getElementById('ttsBtn');
+        ttsBtn.addEventListener('click', () => {
+            addLog('测试语音播放...');
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance('いくらですか');
+                utterance.lang = 'ja-JP';
+                utterance.rate = 1.0;
+                speechSynthesis.speak(utterance);
+                addLog('✅ 语音播放已触发');
+            } else {
+                addLog('❌ 浏览器不支持语音合成');
+            }
+        });
+
+        // 记录浏览器信息
+        addLog(`User Agent: ${navigator.userAgent.substring(0, 50)}...`);
+        addLog(`Pointer Events: ${window.PointerEvent ? '支持' : '不支持'}`);
+        addLog(`Touch Events: ${'ontouchstart' in window ? '支持' : '不支持'}`);
+        addLog(`HTTPS: ${location.protocol === 'https:' ? '是' : '否'}`);
+    </script>
+</body>
+</html>

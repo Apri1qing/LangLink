@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+vi.mock('../hooks/useVoice', () => ({
+  uint8ArrayToBase64: vi.fn(async () => 'bW9j'),
+}))
+
 // Mock dependencies
 vi.mock('./supabase', () => ({
   supabase: {
@@ -57,6 +61,38 @@ describe('translation service', () => {
     it('should be a function', async () => {
       const { voiceTranslate } = await import('./translation')
       expect(typeof voiceTranslate).toBe('function')
+    })
+  })
+
+  describe('splitPcmIntoChunks', () => {
+    it('should return single chunk for short pcm', async () => {
+      const { splitPcmIntoChunks } = await import('./translation')
+      const pcm = new Uint8Array(16000 * 2 * 5)
+      expect(splitPcmIntoChunks(pcm).length).toBe(1)
+    })
+
+    it('should split long pcm into multiple chunks', async () => {
+      const { splitPcmIntoChunks } = await import('./translation')
+      const pcm = new Uint8Array(16000 * 2 * 50)
+      const chunks = splitPcmIntoChunks(pcm)
+      expect(chunks.length).toBeGreaterThan(1)
+    })
+  })
+
+  describe('supportsRequestBodyStream', () => {
+    it('should be a function', async () => {
+      const { supportsRequestBodyStream } = await import('./translation')
+      expect(typeof supportsRequestBodyStream).toBe('function')
+    })
+  })
+
+  describe('padPcmTrailingSilenceMs', () => {
+    it('should append zero bytes for 1s silence at 16kHz mono 16-bit', async () => {
+      const { padPcmTrailingSilenceMs, PCM_BYTES_PER_SEC } = await import('./translation')
+      const pcm = new Uint8Array(100)
+      const out = padPcmTrailingSilenceMs(pcm, 1000)
+      expect(out.length).toBe(100 + PCM_BYTES_PER_SEC)
+      expect(out.slice(100).every((b) => b === 0)).toBe(true)
     })
   })
 

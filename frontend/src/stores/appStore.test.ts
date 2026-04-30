@@ -7,31 +7,35 @@ describe('appStore', () => {
       originalText: '',
       translatedText: '',
       currentPage: 'home',
+      translationError: null,
+      lastSourceLang: null,
+      lastTargetLang: null,
     })
   })
 
-  it('should set translation result and page to result', () => {
-    useAppStore.getState().setTranslationResult('你好', 'こんにちは')
+  it('should set translation result without changing currentPage', () => {
+    useAppStore.getState().setTranslationResult('你好', 'こんにちは', 'voice', null, 'zh', 'ja')
     const state = useAppStore.getState()
     expect(state.originalText).toBe('你好')
     expect(state.translatedText).toBe('こんにちは')
-    expect(state.currentPage).toBe('result')
+    expect(state.currentPage).toBe('home') // v1.4: 不再跳转
+    expect(state.lastSourceLang).toBe('zh')
+    expect(state.lastTargetLang).toBe('ja')
   })
 
   it('should record translation type in store', () => {
-    // setTranslationResult should accept and store type
     useAppStore.getState().setTranslationResult('你好', 'こんにちは', 'phrase')
     const state = useAppStore.getState()
-    // This will fail until we add translationType to the store
-    expect((state as any).translationType).toBe('phrase')
+    expect(state.translationType).toBe('phrase')
   })
 
-  it('should clear translation result and return to home', () => {
-    useAppStore.getState().setTranslationResult('你好', 'こんにちは')
+  it('should clear translation result and reset direction', () => {
+    useAppStore.getState().setTranslationResult('你好', 'こんにちは', 'voice', null, 'zh', 'ja')
     useAppStore.getState().clearTranslationResult()
     const state = useAppStore.getState()
     expect(state.originalText).toBe('')
     expect(state.translatedText).toBe('')
-    expect(state.currentPage).toBe('home')
+    expect(state.lastSourceLang).toBeNull()
+    expect(state.lastTargetLang).toBeNull()
   })
 })

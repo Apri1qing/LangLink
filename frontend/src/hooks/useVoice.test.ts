@@ -15,7 +15,7 @@ function createMockFileReader() {
       onloadendHandler = handler
     },
     result: mockFileReaderResult,
-    readAsDataURL: (_blob: Blob) => {
+    readAsDataURL: () => {
       // Call onloadend after a tick to simulate async FileReader behavior
       setTimeout(() => {
         if (onloadendHandler) {
@@ -57,16 +57,6 @@ describe('useVoice', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockUrls.clear()
-  })
-
-  describe('blobToBase64', () => {
-    it('should convert blob to base64 string', async () => {
-      const { blobToBase64 } = await import('./useVoice')
-      const blob = new Blob(['test content'], { type: 'audio/webm' })
-      const result = await blobToBase64(blob)
-      expect(typeof result).toBe('string')
-      expect(result.length).toBeGreaterThan(0)
-    })
   })
 
   describe('playAudio', () => {

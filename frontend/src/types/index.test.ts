@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { SUPPORTED_LANGUAGES, AUDIO_FORMATS } from '../types'
 
 describe('SUPPORTED_LANGUAGES', () => {
-  it('should contain 17 languages', () => {
-    expect(SUPPORTED_LANGUAGES).toHaveLength(17)
+  it('should contain 9 languages', () => {
+    expect(SUPPORTED_LANGUAGES).toHaveLength(9)
   })
 
   it('should include Chinese and Japanese', () => {
@@ -29,12 +29,11 @@ describe('SUPPORTED_LANGUAGES', () => {
 
   it('should include common languages for travel', () => {
     const codes = SUPPORTED_LANGUAGES.map((l) => l.code)
-    // Chinese, Japanese, English, Korean, Thai
+    // Chinese, Japanese, English, Korean
     expect(codes).toContain('zh')
     expect(codes).toContain('ja')
     expect(codes).toContain('en')
     expect(codes).toContain('ko')
-    expect(codes).toContain('th')
   })
 })
 

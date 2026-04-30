@@ -9,7 +9,7 @@
  */
 
 import { test, expect } from '@playwright/test'
-import { gotoHome, openSettings, goBack } from './helpers/page-helpers'
+import { gotoHome, openSettings } from './helpers/page-helpers'
 
 test.describe('常用语', () => {
   test.beforeEach(async ({ page }) => {

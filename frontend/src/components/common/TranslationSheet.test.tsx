@@ -1,14 +1,22 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, act } from '@testing-library/react'
 import { TranslationSheet } from './TranslationSheet'
+import { useAppStore } from '../../stores/appStore'
+
+const speakTextMock = vi.fn()
+vi.mock('../../hooks/useVoice', () => ({
+  speakText: (...args: unknown[]) => speakTextMock(...args),
+  useVoice: vi.fn(() => ({ isRecording: false, startRecording: vi.fn(), stopRecording: vi.fn() })),
+}))
 
 describe('TranslationSheet', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.useFakeTimers()
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
+    useAppStore.setState({
+      isTranslating: false,
+      translationError: null,
+    })
   })
 
   it('should render original and translated text', () => {
@@ -26,7 +34,23 @@ describe('TranslationSheet', () => {
     expect(screen.getByText('こんにちは')).toBeTruthy()
   })
 
-  it('should show auto close hint', () => {
+  it('should show loading copy when translating', () => {
+    useAppStore.setState({ isTranslating: true })
+    render(
+      <TranslationSheet
+        originalText=""
+        translatedText=""
+        sourceLangName="中文"
+        targetLangName="日本語"
+        targetLang="ja"
+        onClose={vi.fn()}
+      />
+    )
+    expect(screen.getByText(/正在连接并识别|识别中/)).toBeTruthy()
+  })
+
+  it('auto-plays TTS exactly once after translation completes', () => {
+    useAppStore.setState({ isTranslating: false, translationError: null })
     render(
       <TranslationSheet
         originalText="你好"
@@ -35,14 +59,15 @@ describe('TranslationSheet', () => {
         targetLangName="日本語"
         targetLang="ja"
         onClose={vi.fn()}
-        autoCloseMs={3000}
       />
     )
-    expect(screen.getByText('3秒后自动关闭')).toBeTruthy()
+    act(() => { vi.advanceTimersByTime(300) })
+    expect(speakTextMock).toHaveBeenCalledTimes(1)
+    expect(speakTextMock).toHaveBeenCalledWith('こんにちは', 'ja')
   })
 
-  it('should call onClose after autoCloseMs', async () => {
-    const onClose = vi.fn()
+  it('does not auto-play while translation is in progress', () => {
+    useAppStore.setState({ isTranslating: true, translationError: null })
     render(
       <TranslationSheet
         originalText="你好"
@@ -50,49 +75,10 @@ describe('TranslationSheet', () => {
         sourceLangName="中文"
         targetLangName="日本語"
         targetLang="ja"
-        onClose={onClose}
-        autoCloseMs={3000}
+        onClose={vi.fn()}
       />
     )
-
-    vi.advanceTimersByTime(3000)
-    expect(onClose).toHaveBeenCalled()
-  })
-
-  it('should clear timeout on unmount', () => {
-    const onClose = vi.fn()
-    const { unmount } = render(
-      <TranslationSheet
-        originalText="你好"
-        translatedText="こんにちは"
-        sourceLangName="中文"
-        targetLangName="日本語"
-        targetLang="ja"
-        onClose={onClose}
-        autoCloseMs={3000}
-      />
-    )
-
-    unmount()
-    vi.advanceTimersByTime(3000)
-    expect(onClose).not.toHaveBeenCalled()
-  })
-
-  it('should not call onClose before timeout', () => {
-    const onClose = vi.fn()
-    render(
-      <TranslationSheet
-        originalText="你好"
-        translatedText="こんにちは"
-        sourceLangName="中文"
-        targetLangName="日本語"
-        targetLang="ja"
-        onClose={onClose}
-        autoCloseMs={3000}
-      />
-    )
-
-    vi.advanceTimersByTime(2000) // only 2 seconds
-    expect(onClose).not.toHaveBeenCalled()
+    act(() => { vi.advanceTimersByTime(300) })
+    expect(speakTextMock).not.toHaveBeenCalled()
   })
 })
