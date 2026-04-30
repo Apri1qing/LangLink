@@ -1,0 +1,62 @@
+- generic [ref=e63]:
+  - generic [ref=e64]:
+    - button "历史会话" [ref=e65]:
+      - generic [ref=e66]: 🕒
+    - generic [ref=e67]:
+      - button "照片模式" [ref=e68]:
+        - generic [ref=e69]: 📷
+      - button "语音模式" [ref=e70]:
+        - generic [ref=e71]: 🎙
+    - button "设置" [ref=e72]:
+      - generic [ref=e73]: ⚙
+  - generic [ref=e74]:
+    - generic [ref=e75]:
+      - heading "语言配对" [level=3] [ref=e76]
+      - generic [ref=e77]:
+        - generic [ref=e78]:
+          - combobox "母语" [ref=e79]:
+            - option "中文" [selected]
+            - option "English"
+            - option "日本語"
+            - option "한국어"
+            - option "Français"
+            - option "Deutsch"
+            - option "Русский"
+            - option "Italiano"
+            - option "Español"
+          - generic [ref=e80]: ↔
+          - combobox "外语" [ref=e81]:
+            - option "中文"
+            - option "English"
+            - option "日本語" [selected]
+            - option "한국어"
+            - option "Français"
+            - option "Deutsch"
+            - option "Русский"
+            - option "Italiano"
+            - option "Español"
+        - paragraph [ref=e82]: 左侧为母语，右侧为外语。录音时自动识别语言并翻译。
+    - generic [ref=e83]:
+      - heading "常用语管理" [level=3] [ref=e84]
+      - generic [ref=e85]:
+        - generic [ref=e87]:
+          - paragraph [ref=e88]: 多少钱
+          - button "删除 多少钱" [ref=e89]: −
+        - generic [ref=e92]:
+          - paragraph [ref=e93]: 地铁站在哪里
+          - button "删除 地铁站在哪里" [ref=e94]: −
+        - generic [ref=e97]:
+          - paragraph [ref=e98]: 可以刷卡吗
+          - button "删除 可以刷卡吗" [ref=e99]: −
+        - generic [ref=e102]:
+          - paragraph [ref=e103]: 这个是什么
+          - button "删除 这个是什么" [ref=e104]: −
+        - generic [ref=e107]:
+          - paragraph [ref=e108]: 谢谢
+          - button "删除 谢谢" [ref=e109]: −
+        - generic [ref=e112]:
+          - paragraph [ref=e113]: 洗手间在哪里
+          - button "删除 洗手间在哪里" [ref=e114]: −
+        - button "+ 添加常用语" [ref=e115]:
+          - generic [ref=e116]: +
+          - generic [ref=e117]: 添加常用语
