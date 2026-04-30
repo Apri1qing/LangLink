@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useVoice, convertToPCM, playAudio } from '../../hooks/useVoice'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useVoice, isSpeechRecognitionSupported, recognizeWithBrowserSpeech, convertToPCM, uint8ArrayToBase64, speakText } from '../../hooks/useVoice'
 import { checkQuota } from '../../services/quota'
-import { voiceTranslate } from '../../services/translation'
+import { translateText, voiceTranslate } from '../../services/translation'
 import { SUPPORTED_LANGUAGES, type LanguageCode } from '../../types'
 
 export default function VoiceTranslate() {
@@ -14,13 +14,18 @@ export default function VoiceTranslate() {
   const [remaining, setRemaining] = useState<number | null>(null)
   const [showQuotaWarning, setShowQuotaWarning] = useState(false)
   const [showResult, setShowResult] = useState(false)
+  const [isSupported, setIsSupported] = useState(true)
+  const [useGummy, setUseGummy] = useState(true)
+
+  const recognitionRef = useRef<{ stop: () => void } | null>(null)
+  const lastTranslateKeyRef = useRef('')
 
   const { isRecording, duration, startRecording, stopRecording, error: recordingError } = useVoice({
     onRecordingComplete: handleRecordingComplete,
     onError: (err) => setError(err.message),
   })
 
-  // Check quota on mount
+  // Check quota on mount and speech support
   useEffect(() => {
     checkQuota().then(({ allowed, remaining: rem }) => {
       setRemaining(rem)
@@ -28,39 +33,17 @@ export default function VoiceTranslate() {
         setShowQuotaWarning(true)
       }
     })
+    setIsSupported(isSpeechRecognitionSupported())
   }, [])
 
-  async function handleRecordingComplete(blob: Blob, recordedDuration: number) {
-    console.log(`Recording complete: ${recordedDuration}s, size: ${blob.size}`)
-
-    setIsLoading(true)
-    setError('')
-
-    try {
-      // Convert to PCM format for gummy
-      const audioData = await convertToPCM(blob)
-      console.log(`Converted to PCM: ${audioData.length} bytes`)
-
-      // Convert to base64 for API
-      const base64 = btoa(String.fromCharCode(...audioData))
-
-      // Call translation API
-      const result = await voiceTranslate(base64, sourceLang, targetLang, 'audio/pcm')
-
-      setOriginalText(result.originalText || '')
-      setTranslatedText(result.translatedText || '')
-      setShowResult(true)
-
-      // Auto-play translated audio
-      if (result.audioUrl) {
-        playAudio(result.audioUrl)
+  // Cleanup recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Translation failed')
-    } finally {
-      setIsLoading(false)
     }
-  }
+  }, [])
 
   const handleRecording = useCallback(async () => {
     if (showQuotaWarning) {
@@ -69,21 +52,133 @@ export default function VoiceTranslate() {
     }
 
     if (isRecording) {
+      // Stop speech recognition or recording
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+        recognitionRef.current = null
+      }
       await stopRecording()
     } else {
       setError('')
       setShowResult(false)
-      await startRecording()
+      setOriginalText('')
+      setTranslatedText('')
+
+      if (useGummy) {
+        // Use gummy WebSocket via Edge Function
+        await startRecording()
+      } else {
+        // Use browser Web Speech API
+        if (!isSpeechRecognitionSupported()) {
+          setError('您的浏览器不支持语音识别，请使用Chrome或Edge浏览器')
+          setIsSupported(false)
+          return
+        }
+
+        setIsLoading(true)
+        startRecording()
+
+        // Start browser speech recognition
+        recognitionRef.current = recognizeWithBrowserSpeech(
+          sourceLang,
+          (transcript) => {
+            setOriginalText(transcript)
+          },
+          (err) => {
+            console.error('Speech recognition error:', err)
+            if (err === 'no-speech') {
+              setError('没有检测到语音，请重试')
+            } else if (err !== 'aborted') {
+              setError(`语音识别错误: ${err}`)
+            }
+          }
+        )
+      }
     }
-  }, [isRecording, showQuotaWarning, startRecording, stopRecording])
+  }, [isRecording, showQuotaWarning, startRecording, stopRecording, sourceLang, useGummy])
+
+  // Handle recording complete for gummy mode
+  async function handleRecordingComplete(blob: Blob, recordedDuration: number) {
+    if (!useGummy) return
+
+    console.log(`Recording complete: ${recordedDuration}s, size: ${blob.size}`)
+
+    setIsLoading(true)
+    setError('')
+
+    try {
+      // Convert webm audio to PCM format for gummy
+      const pcmData = await convertToPCM(blob)
+      console.log(`Converted to PCM: ${pcmData.length} bytes`)
+
+      // Convert to base64 for Edge Function
+      const base64 = await uint8ArrayToBase64(pcmData)
+      console.log(`Audio base64 length: ${base64.length}`)
+
+      // Call Edge Function which handles gummy WebSocket
+      const result = await voiceTranslate(base64, sourceLang, targetLang, 'audio/pcm')
+      console.log('Translation result:', result)
+
+      setOriginalText(result.originalText || '')
+      setTranslatedText(result.translatedText || '')
+      setShowResult(true)
+
+      // Auto-play TTS for translated text (browser-native Web Speech API)
+      if (result.translatedText) {
+        speakText(result.translatedText, targetLang)
+      }
+    } catch (err) {
+      console.error('Translation error:', err)
+      setError(err instanceof Error ? err.message : 'Translation failed')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Translate when original text changes (only for browser speech mode)
+  useEffect(() => {
+    const translateKey = `${sourceLang}:${targetLang}:${originalText}`
+    if (useGummy || !originalText || lastTranslateKeyRef.current === translateKey) return
+
+    const doTranslate = async () => {
+      try {
+        const translated = await translateText(originalText, sourceLang, targetLang)
+        lastTranslateKeyRef.current = translateKey
+        setTranslatedText(translated)
+        setShowResult(true)
+      } catch (err) {
+        console.error('Translation error:', err)
+        setError(err instanceof Error ? err.message : '翻译失败')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    // Debounce translation
+    const timer = setTimeout(doTranslate, 500)
+    return () => clearTimeout(timer)
+  }, [originalText, sourceLang, targetLang, useGummy])
 
   return (
     <div className="max-w-md mx-auto">
+      {/* Mode Toggle */}
+      <div className="mb-4 flex items-center justify-center gap-2">
+        <label className="flex items-center gap-2 text-sm text-[var(--color-text)]">
+          <input
+            type="checkbox"
+            checked={useGummy}
+            onChange={(e) => setUseGummy(e.target.checked)}
+            className="rounded"
+          />
+          使用 Gummy API（实验性）
+        </label>
+      </div>
+
       {/* Quota Warning Banner */}
       {showQuotaWarning && (
         <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
           <p className="text-yellow-800 text-sm">
-            ⚠️ 今日免费翻译次数已用完（{remaining ?? 0} 次剩余）
+            今日免费翻译次数已用完（{remaining ?? 0} 次剩余）
           </p>
           <button
             onClick={() => setShowQuotaWarning(false)}
@@ -129,7 +224,7 @@ export default function VoiceTranslate() {
       <div className="flex flex-col items-center">
         <button
           onClick={handleRecording}
-          disabled={isLoading || showQuotaWarning}
+          disabled={isLoading || showQuotaWarning || (!useGummy && !isSupported)}
           className={`w-24 h-24 rounded-full flex items-center justify-center text-4xl transition-all ${
             isRecording
               ? 'bg-red-500 text-white animate-pulse'
@@ -148,6 +243,11 @@ export default function VoiceTranslate() {
         <p className="mt-2 text-xs text-[var(--color-text)]">
           剩余 {remaining ?? '--'} 次翻译
         </p>
+        {!useGummy && !isSupported && (
+          <p className="mt-2 text-xs text-red-500">
+            浏览器不支持语音识别，请使用Chrome或Edge
+          </p>
+        )}
       </div>
 
       {/* Result Display */}
@@ -167,6 +267,12 @@ export default function VoiceTranslate() {
                 <span className="font-medium">翻译:</span> {SUPPORTED_LANGUAGES.find((l) => l.code === targetLang)?.name}
               </p>
               <p className="text-2xl font-bold text-[var(--color-text-heading)]">{translatedText}</p>
+              <button
+                onClick={() => speakText(translatedText, targetLang)}
+                className="mt-2 px-3 py-1 text-xs bg-[var(--color-primary)] text-white rounded-full hover:bg-[var(--color-primary)]/90"
+              >
+                🔊 播放翻译
+              </button>
             </div>
           )}
         </div>

@@ -39,10 +39,12 @@ function App() {
     <div
       className="bg-[#F2EDE8] flex flex-col"
       style={{
-        maxWidth: 390,
+        width: '100dvw',
+        maxWidth: '100%',
         margin: '0 auto',
         height: '100dvh',
         overflow: 'hidden',
+        boxSizing: 'border-box',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
         paddingLeft: 'env(safe-area-inset-left)',

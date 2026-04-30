@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { OcrRegion } from '../../types'
 import { locationToPercent } from '../../utils/bboxMap'
+import { Eye, Languages, Trash2 } from 'lucide-react'
 
 interface PhotoOverlayProps {
   imageDataUrl: string
@@ -25,17 +26,14 @@ export function PhotoOverlay({
   onDelete,
 }: PhotoOverlayProps) {
   const imgRef = useRef<HTMLImageElement>(null)
-  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null)
-
-  useEffect(() => {
-    // 重置尺寸（换图时）
-    setImgSize(null)
-  }, [imageDataUrl])
+  const [imgMeta, setImgMeta] = useState<{ src: string; w: number; h: number } | null>(null)
 
   const handleLoad = () => {
     const el = imgRef.current
-    if (el) setImgSize({ w: el.naturalWidth, h: el.naturalHeight })
+    if (el) setImgMeta({ src: imageDataUrl, w: el.naturalWidth, h: el.naturalHeight })
   }
+
+  const imgSize = imgMeta?.src === imageDataUrl ? imgMeta : null
 
   return (
     <div className="relative w-full h-full bg-black rounded-2xl overflow-hidden">
@@ -91,9 +89,9 @@ export function PhotoOverlay({
         type="button"
         onClick={onToggle}
         aria-label={showTranslated ? '显示原图' : '显示译文'}
-        className="absolute top-3 left-3 w-11 h-11 rounded-full bg-black/60 text-white flex items-center justify-center active:scale-95 backdrop-blur-sm"
+        className="absolute top-3 left-3 w-11 h-11 rounded-full glass-control-dark text-white flex items-center justify-center active:scale-95 transition-transform"
       >
-        <span className="text-lg" aria-hidden>{showTranslated ? '🌐' : '👁'}</span>
+        {showTranslated ? <Eye size={21} aria-hidden /> : <Languages size={21} aria-hidden />}
       </button>
 
       {/* 右下角：删除 */}
@@ -101,9 +99,9 @@ export function PhotoOverlay({
         type="button"
         onClick={onDelete}
         aria-label="删除照片"
-        className="absolute bottom-3 right-3 w-11 h-11 rounded-full bg-black/60 text-white flex items-center justify-center active:scale-95 backdrop-blur-sm"
+        className="absolute bottom-3 right-3 w-11 h-11 rounded-full glass-control-dark text-white flex items-center justify-center active:scale-95 transition-transform"
       >
-        <span className="text-lg" aria-hidden>🗑</span>
+        <Trash2 size={20} aria-hidden />
       </button>
     </div>
   )

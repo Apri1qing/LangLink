@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { SubPageTopBar } from '../common/SubPageTopBar'
 import { useAppStore } from '../../stores/appStore'
 import { SUPPORTED_LANGUAGES, type LanguageCode, type Phrase } from '../../types'
@@ -10,13 +10,9 @@ export function Settings() {
   const pair = useAppStore((s) => s.languagePair)
   const setLanguagePair = useAppStore((s) => s.setLanguagePair)
 
-  const [phrases, setPhrases] = useState<Phrase[]>([])
+  const [phrases, setPhrases] = useState<Phrase[]>(() => getPhrases())
   const [showAddForm, setShowAddForm] = useState(false)
   const [newText, setNewText] = useState('')
-
-  useEffect(() => {
-    setPhrases(getPhrases())
-  }, [])
 
   const handleAdd = () => {
     const text = newText.trim()

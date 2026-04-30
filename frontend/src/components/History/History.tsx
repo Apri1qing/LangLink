@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { SubPageTopBar } from '../common/SubPageTopBar'
 import { useAppStore } from '../../stores/appStore'
 import { getSessions, type Session } from '../../services/sessions'
@@ -8,11 +8,7 @@ import { getSessions, type Session } from '../../services/sessions'
  */
 export function History() {
   const { setPage, setDisplayMode, setMessages, setCurrentSessionId } = useAppStore()
-  const [sessions, setSessions] = useState<Session[]>([])
-
-  useEffect(() => {
-    setSessions(getSessions())
-  }, [])
+  const [sessions] = useState<Session[]>(() => getSessions())
 
   const loadSession = (session: Session) => {
     setMessages(

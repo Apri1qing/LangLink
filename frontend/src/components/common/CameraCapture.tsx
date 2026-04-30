@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useCamera } from '../../hooks/useCamera'
+import { Check, RotateCcw, X } from 'lucide-react'
 
 interface CameraCaptureProps {
   /** 用户确认"使用照片"后触发，携带 base64 图像 */
@@ -52,18 +53,20 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
   if (capturedImage) {
     return (
       <div className="relative w-full h-full bg-black rounded-2xl overflow-hidden">
-        <img src={capturedImage} alt="Captured" className="w-full h-full object-contain" />
+        <img src={capturedImage} alt="Captured" className="w-full h-full object-cover" />
         <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4">
           <button
             onClick={handleRetake}
-            className="px-6 py-3 bg-white/80 text-black rounded-full font-medium"
+            className="h-12 px-5 glass-control text-[#1A1A1A] rounded-full font-medium flex items-center gap-2 active:scale-95 transition-transform"
           >
+            <RotateCcw size={18} aria-hidden />
             重拍
           </button>
           <button
             onClick={handleConfirm}
-            className="px-6 py-3 bg-[#1A1A1A] text-white rounded-full font-medium"
+            className="h-12 px-5 glass-control-dark text-white rounded-full font-medium flex items-center gap-2 active:scale-95 transition-transform"
           >
+            <Check size={18} aria-hidden />
             使用照片
           </button>
         </div>
@@ -89,9 +92,9 @@ export function CameraCapture({ onCapture, onClose }: CameraCaptureProps) {
       </div>
       <button
         onClick={handleClose}
-        className="absolute top-4 right-4 w-11 h-11 rounded-full bg-black/50 text-white flex items-center justify-center"
+        className="absolute top-4 right-4 w-11 h-11 rounded-full glass-control-dark text-white flex items-center justify-center active:scale-95 transition-transform"
       >
-        ✕
+        <X size={21} aria-hidden />
       </button>
     </div>
   )

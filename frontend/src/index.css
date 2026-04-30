@@ -22,20 +22,14 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-primary: #c084fc;
-    --color-primary-bg: rgba(192, 132, 252, 0.15);
-    --color-text: #9ca3af;
-    --color-text-heading: #f3f4f6;
-    --color-bg: #16171d;
-    --color-border: #2e303a;
-  }
+* {
+  box-sizing: border-box;
 }
 
 html, body {
   margin: 0;
   padding: 0;
+  width: 100%;
   height: 100%;
   overflow: hidden;          /* 锁死 body 不可滚动 */
   overscroll-behavior: none; /* 禁止 iOS 橡皮筋下拉刷新 */
@@ -54,9 +48,38 @@ html, body {
 }
 
 #root {
+  width: 100%;
   height: 100%;              /* 撑满 body */
   margin: 0;
   padding: 0;                /* 移除默认 1rem padding，防止撑出滚动 */
+  background-color: var(--color-bg);
+}
+
+.glass-control {
+  color: #1a1a1a;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.34)),
+    rgba(242, 237, 232, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25),
+    0 8px 24px rgba(30, 24, 18, 0.1);
+  backdrop-filter: blur(18px) saturate(1.45);
+  -webkit-backdrop-filter: blur(18px) saturate(1.45);
+}
+
+.glass-control-dark {
+  color: #ffffff;
+  background:
+    linear-gradient(145deg, rgba(40, 40, 40, 0.82), rgba(18, 18, 18, 0.64)),
+    rgba(26, 26, 26, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 10px 28px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
 }
 
 /* Slide up animation for TranslationSheet */

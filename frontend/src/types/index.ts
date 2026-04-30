@@ -1,22 +1,14 @@
-// Supported languages
+// Supported languages (must match gummy ASR and qwen3-tts-flash supported languages)
 export const SUPPORTED_LANGUAGES = [
   { code: 'zh', name: '中文' },
-  { code: 'ja', name: '日本語' },
   { code: 'en', name: 'English' },
+  { code: 'ja', name: '日本語' },
   { code: 'ko', name: '한국어' },
-  { code: 'es', name: 'Español' },
   { code: 'fr', name: 'Français' },
   { code: 'de', name: 'Deutsch' },
-  { code: 'it', name: 'Italiano' },
-  { code: 'pt', name: 'Português' },
   { code: 'ru', name: 'Русский' },
-  { code: 'ar', name: 'العربية' },
-  { code: 'hi', name: 'हिन्दी' },
-  { code: 'th', name: 'ไทย' },
-  { code: 'vi', name: 'Tiếng Việt' },
-  { code: 'id', name: 'Bahasa Indonesia' },
-  { code: 'ms', name: 'Bahasa Melayu' },
-  { code: 'tl', name: 'Filipino' },
+  { code: 'it', name: 'Italiano' },
+  { code: 'es', name: 'Español' },
 ] as const
 
 export type LanguageCode = typeof SUPPORTED_LANGUAGES[number]['code']
@@ -32,30 +24,46 @@ export interface VoiceTranslateRequest {
 export interface VoiceTranslateResponse {
   originalText: string
   translatedText: string
-  audioUrl: string
+  audioUrl?: string
 }
 
 export interface ImageTranslateRequest {
   image: File
   sourceLang?: LanguageCode | 'auto'
   targetLang: LanguageCode
+  nativeLang?: LanguageCode
+  foreignLang?: LanguageCode
+}
+
+/** v1.4: qwen-vl-ocr advanced_recognition 返回的单条文字区域 */
+export interface OcrRegion {
+  originalText: string
+  translatedText: string
+  /** 原图坐标（像素）。8 个值：[x1,y1, x2,y2, x3,y3, x4,y4]（顺序：左上→右上→右下→左下） */
+  location: number[]
 }
 
 export interface ImageTranslateResponse {
   originalText: string
   translatedText: string
-  translatedImageUrl: string
+  translatedImageUrl?: string
+  /** v1.4: 每个识别区域 + 译文 + 位置；前端据此渲染叠加层 */
+  regions?: OcrRegion[]
 }
 
 // Phrase types
+export interface PhraseTranslation {
+  translated: string
+  audioUrl?: string
+}
+
 export interface Phrase {
   id: number
   user_id?: string
   text: string
-  translation?: string
   source_lang: LanguageCode
-  target_lang: LanguageCode
-  audio_url?: string
+  /** Lazy-cached translations keyed by target language code */
+  translations: Record<string, PhraseTranslation>
   usage_count: number
   created_at: string
   updated_at: string
@@ -63,16 +71,12 @@ export interface Phrase {
 
 export interface PhraseCreateRequest {
   text: string
-  translation?: string
   source_lang: LanguageCode
-  target_lang: LanguageCode
 }
 
 export interface PhraseUpdateRequest {
   text?: string
-  translation?: string
   source_lang?: LanguageCode
-  target_lang?: LanguageCode
 }
 
 // User quota types

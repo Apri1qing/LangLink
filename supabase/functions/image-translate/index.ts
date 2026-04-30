@@ -10,7 +10,9 @@ import {
 interface ImageTranslateRequest {
   image: string // base64 encoded image (data URL prefix stripped by caller)
   sourceLang?: string
-  targetLang: string
+  targetLang?: string
+  nativeLang?: string
+  foreignLang?: string
 }
 
 interface OcrWord {
@@ -195,13 +197,20 @@ async function ocrWithBboxes(imageBase64: string): Promise<OcrWord[]> {
 async function batchTranslate(
   texts: string[],
   targetLang: string,
+  options?: { nativeLang?: string; foreignLang?: string },
 ): Promise<string[]> {
   if (texts.length === 0) return []
 
   const targetLangName = LANG_MAP[targetLang] || targetLang
-  const systemPrompt =
-    `You are a professional translator. Translate each of the following texts to ${targetLangName}. ` +
-    `Reply ONLY with a JSON array of strings in the same order and length. No explanations, no code fences.`
+  const nativeLangName = options?.nativeLang ? (LANG_MAP[options.nativeLang] || options.nativeLang) : ''
+  const foreignLangName = options?.foreignLang ? (LANG_MAP[options.foreignLang] || options.foreignLang) : ''
+  const systemPrompt = options?.nativeLang && options?.foreignLang
+    ? `You are a professional travel translator. Native language: ${nativeLangName}. Foreign language: ${foreignLangName}. ` +
+      `For each input text, translate native-language text to ${foreignLangName}, and translate all other readable text to ${nativeLangName}. ` +
+      `Do not return the original text unchanged unless it is only a number, symbol, brand name, or proper noun. ` +
+      `Reply ONLY with a JSON array of strings in the same order and length. No explanations, no code fences.`
+    : `You are a professional translator. Translate each of the following texts to ${targetLangName}. ` +
+      `Reply ONLY with a JSON array of strings in the same order and length. No explanations, no code fences.`
   const userPayload = JSON.stringify(texts)
 
   console.log(
@@ -271,15 +280,19 @@ Deno.serve(async (req) => {
 
   try {
     const body = (await req.json()) as ImageTranslateRequest
-    const { image, targetLang } = body
+    const { image, nativeLang, foreignLang } = body
+    const targetLang = body.targetLang || nativeLang
     if (!image || !targetLang) {
       return Response.json(
-        { error: 'image and targetLang are required' },
+        { error: 'image and targetLang/nativeLang are required' },
         { status: 400, headers: corsHeaders },
       )
     }
 
-    console.log(`[FN] image-translate → ${targetLang}`)
+    console.log(
+      `[FN] image-translate → ${targetLang}`,
+      nativeLang && foreignLang ? `(pair ${nativeLang}<->${foreignLang})` : '',
+    )
 
     let words: OcrWord[] = []
     try {
@@ -298,6 +311,7 @@ Deno.serve(async (req) => {
       translated = await batchTranslate(
         words.map((w) => w.text),
         targetLang,
+        { nativeLang, foreignLang },
       )
     } catch (e) {
       console.error('[FN] Translate failed:', e)

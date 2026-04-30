@@ -1,5 +1,6 @@
 import { useAppStore, type ConversationMessage } from '../../stores/appStore'
 import { speakText } from '../../hooks/useVoice'
+import { Play } from 'lucide-react'
 
 interface ConversationBubbleProps {
   message: ConversationMessage
@@ -32,9 +33,9 @@ export function ConversationBubble({ message }: ConversationBubbleProps) {
               type="button"
               onClick={handlePlay}
               aria-label="播放翻译"
-              className="mt-0.5 w-7 h-7 shrink-0 rounded-full bg-white/20 text-white text-xs flex items-center justify-center active:scale-95"
+              className="mt-0.5 w-7 h-7 shrink-0 rounded-full bg-white/18 text-white flex items-center justify-center active:scale-95 transition-transform"
             >
-              ▶
+              <Play size={13} fill="currentColor" strokeWidth={0} aria-hidden />
             </button>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium whitespace-pre-wrap">{message.translatedText}</p>
@@ -59,9 +60,9 @@ export function ConversationBubble({ message }: ConversationBubbleProps) {
             type="button"
             onClick={handlePlay}
             aria-label="播放翻译"
-            className="mt-0.5 w-7 h-7 shrink-0 rounded-full bg-black/10 text-[#2D2D2D] text-xs flex items-center justify-center active:scale-95"
+            className="mt-0.5 w-7 h-7 shrink-0 rounded-full bg-black/10 text-[#2D2D2D] flex items-center justify-center active:scale-95 transition-transform"
           >
-            ▶
+            <Play size={13} fill="currentColor" strokeWidth={0} aria-hidden />
           </button>
         </div>
       </div>

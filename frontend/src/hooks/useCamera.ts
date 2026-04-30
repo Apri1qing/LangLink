@@ -111,14 +111,34 @@ export function useCamera() {
         })
       }
       
+      const sourceWidth = video.videoWidth || 1280
+      const sourceHeight = video.videoHeight || 720
+      const frameWidth = video.clientWidth || sourceWidth
+      const frameHeight = video.clientHeight || sourceHeight
+      const sourceAspect = sourceWidth / sourceHeight
+      const frameAspect = frameWidth / frameHeight
+
+      let sx = 0
+      let sy = 0
+      let sw = sourceWidth
+      let sh = sourceHeight
+
+      if (sourceAspect > frameAspect) {
+        sw = Math.round(sourceHeight * frameAspect)
+        sx = Math.round((sourceWidth - sw) / 2)
+      } else if (sourceAspect < frameAspect) {
+        sh = Math.round(sourceWidth / frameAspect)
+        sy = Math.round((sourceHeight - sh) / 2)
+      }
+
       const canvas = document.createElement('canvas')
-      canvas.width = video.videoWidth || 1280
-      canvas.height = video.videoHeight || 720
+      canvas.width = sw
+      canvas.height = sh
 
       const ctx = canvas.getContext('2d')
       if (!ctx) return null
 
-      ctx.drawImage(video, 0, 0)
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh)
       const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
 
       setCapturedImage(dataUrl)
