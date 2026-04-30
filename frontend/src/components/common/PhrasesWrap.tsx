@@ -9,12 +9,12 @@ export function PhrasesWrap({ phrases, onPhraseClick }: PhrasesWrapProps) {
   const displayed = phrases.slice(0, 10)
   if (displayed.length === 0) return null
   return (
-    <div className="py-1">
+    <div className="pt-0 pb-1">
       <div className="px-1 mb-1">
         <span className="text-[#AAAAAA] text-xs font-medium tracking-wide">常用语</span>
       </div>
       <div
-        className="grid grid-rows-2 grid-flow-col gap-2 overflow-x-auto snap-x snap-mandatory scrollbar-hide"
+        className="grid grid-rows-2 grid-flow-col gap-1.5 overflow-x-auto snap-x snap-mandatory scrollbar-hide"
         style={{ gridAutoColumns: 'max-content' }}
       >
         {displayed.map((phrase) => (
