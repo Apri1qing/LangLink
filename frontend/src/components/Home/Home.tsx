@@ -33,6 +33,12 @@ export function Home() {
     translationType,
     translationError,
     isTranslating,
+    voiceCapturing,
+    voiceStreaming,
+    voiceTextComplete,
+    voiceTtsPending,
+    voiceTtsReady,
+    voiceTtsError,
     lastSourceLang,
     lastTargetLang,
   } = useAppStore()
@@ -136,7 +142,15 @@ export function Home() {
   }, [isRightRecording, isRecording, startRightRecording, stopRecording])
 
   const hasVoiceResult = !!originalText && (translationType === 'voice' || translationType === 'phrase')
-  const showSheet = isTranslating || !!translationError || hasVoiceResult
+  const hasVoiceActivity = voiceCapturing || voiceStreaming || voiceTextComplete || voiceTtsPending
+  const showSheet = isTranslating || hasVoiceActivity || !!translationError || hasVoiceResult
+  const ttsStatus = voiceTtsPending
+    ? 'pending'
+    : voiceTtsReady
+      ? 'ready'
+      : voiceTtsError
+        ? 'error'
+        : 'idle'
 
   // 翻译方向：正在录音时依赖 pill side；收到结果后依赖 lastSourceLang/lastTargetLang
   const activeSource = isLeftRecording
@@ -175,7 +189,7 @@ export function Home() {
       </div>
 
       {/* 双 pill（按下说话） */}
-      <div className="shrink-0 py-2">
+      <div className={`shrink-0 py-1.5 ${isRecording || voiceCapturing || voiceStreaming ? 'relative z-40' : ''}`}>
         <DualPill
           leftLabel={leftLabel}
           rightLabel={rightLabel}
@@ -187,7 +201,10 @@ export function Home() {
       </div>
 
       {/* 常用语 */}
-      <div className="shrink-0 px-4 pb-3">
+      <div
+        className="shrink-0 px-4 pt-1"
+        style={{ paddingBottom: 'max(0.5rem, min(env(safe-area-inset-bottom), 0.75rem))' }}
+      >
         <PhrasesWrap phrases={phrases} onPhraseClick={handlePhraseClick} />
       </div>
 
@@ -200,6 +217,9 @@ export function Home() {
           sourceLangName={langName(activeSource)}
           targetLangName={langName(activeTarget)}
           targetLang={activeTarget}
+          isStreaming={voiceCapturing || voiceStreaming}
+          ttsStatus={ttsStatus}
+          isNonModal={voiceCapturing || voiceStreaming}
           onClose={clearTranslationResult}
         />
       )}
