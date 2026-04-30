@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
-import { useVoiceTranslateContext } from '../../contexts/VoiceTranslateContext'
+import { useVoiceTranslateContext } from '../../contexts/useVoiceTranslateContext'
 import { TopBar } from '../common/TopBar'
 import { DualPill } from '../common/DualPill'
 import { PhrasesWrap } from '../common/PhrasesWrap'
@@ -10,6 +10,7 @@ import { recordTranslation, newSession } from '../../services/sessions'
 import { SUPPORTED_LANGUAGES, type Phrase } from '../../types'
 import { unlockAudioContext, playAudioUrl } from '../../services/audioUnlock'
 import { speakText } from '../../hooks/useVoice'
+import { Plus } from 'lucide-react'
 
 export function VoiceMode() {
   const {
@@ -23,16 +24,14 @@ export function VoiceMode() {
   const {
     isLeftRecording,
     isRightRecording,
+    recordingSide,
     startLeftRecording,
     startRightRecording,
     stopRecording,
   } = useVoiceTranslateContext()
   const isRecording = isLeftRecording || isRightRecording
-  const [phrases, setPhrases] = useState<Phrase[]>([])
-
-  useEffect(() => {
-    setPhrases(getPhrases())
-  }, [])
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [phrases] = useState<Phrase[]>(() => getPhrases())
 
   const langName = (code: string) =>
     SUPPORTED_LANGUAGES.find((l) => l.code === code)?.name ?? code
@@ -86,15 +85,52 @@ export function VoiceMode() {
 
   // 录音中或翻译中：在历史气泡之后渲染一个"活跃气泡"，实时反映 originalText/translatedText
   const showActiveBubble = isRecording || isTranslating
+  const activeBubbleIsUser = recordingSide === 'right'
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [messages.length, showActiveBubble, originalText, translatedText])
+
+  const activeBubble = (
+    <div className={`flex ${activeBubbleIsUser ? 'justify-end' : 'justify-start'}`}>
+      <div
+        className={`max-w-[82%] rounded-2xl px-4 py-3 ${
+          activeBubbleIsUser
+            ? 'rounded-br-sm bg-[#1A1A1A] text-white'
+            : 'rounded-bl-sm bg-[#F0EDE8] text-[#2D2D2D]'
+        }`}
+      >
+        {originalText ? (
+          <>
+            <p className={`text-xs ${activeBubbleIsUser ? 'text-white/65' : 'text-[#888888]'}`}>
+              原文：{originalText}
+            </p>
+            <p className="text-sm font-medium mt-1 whitespace-pre-wrap">
+              {translatedText || '翻译中...'}
+            </p>
+          </>
+        ) : (
+          <p className="text-sm opacity-70 animate-pulse">识别中...</p>
+        )}
+      </div>
+    </div>
+  )
 
   return (
-    <div className="flex flex-col h-full bg-[#F2EDE8]">
+    <div className="flex h-full min-h-0 flex-col bg-[#F2EDE8]">
       <TopBar />
 
       {/* 聊天区 — 白色圆角框，与相机取景框对应 */}
-      <div className="flex-1 min-h-0 px-4 py-2">
+      <div className="min-h-0 flex-1 px-4 py-2">
         <div className="relative w-full h-full bg-white rounded-2xl overflow-hidden">
-          <div className="h-full overflow-y-auto px-4 py-4 scrollbar-hide">
+          <div
+            ref={scrollRef}
+            className={`h-full overflow-y-auto px-4 pt-4 scrollbar-hide ${
+              messages.length > 0 ? 'pb-20' : 'pb-4'
+            }`}
+          >
             {messages.length === 0 && !showActiveBubble ? (
               <div className="flex flex-col items-center justify-center h-full text-[#AAAAAA]">
                 <p className="text-sm">点击下方按钮开始对话</p>
@@ -104,22 +140,7 @@ export function VoiceMode() {
                 {messages.map((message) => (
                   <ConversationBubble key={message.id} message={message} />
                 ))}
-                {showActiveBubble && (
-                  <div className="flex justify-end">
-                    <div className="bg-[#1A1A1A] text-white rounded-2xl rounded-br-sm px-4 py-3 max-w-[85%]">
-                      {originalText ? (
-                        <>
-                          <p className="text-xs opacity-70">{originalText}</p>
-                          <p className="text-sm font-medium mt-1">
-                            {translatedText || '翻译中…'}
-                          </p>
-                        </>
-                      ) : (
-                        <p className="text-sm opacity-70 animate-pulse">识别中…</p>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {showActiveBubble && activeBubble}
               </div>
             )}
           </div>
@@ -128,16 +149,16 @@ export function VoiceMode() {
               type="button"
               aria-label="新对话"
               onClick={newSession}
-              className="absolute bottom-3 right-3 w-12 h-12 rounded-full bg-[#1A1A1A] text-white text-xl flex items-center justify-center shadow-lg active:scale-95"
+              className="absolute bottom-3 right-3 w-12 h-12 rounded-full glass-control-dark text-white flex items-center justify-center active:scale-95 transition-transform"
             >
-              ＋
+              <Plus size={25} strokeWidth={2.4} aria-hidden />
             </button>
           )}
         </div>
       </div>
 
       {/* 双 pill */}
-      <div className="py-2">
+      <div className="shrink-0 py-2">
         <DualPill
           leftLabel={langName(languagePair.B)}
           rightLabel={langName(languagePair.A)}
@@ -149,7 +170,7 @@ export function VoiceMode() {
       </div>
 
       {/* 常用语 */}
-      <div className="px-4 pb-6">
+      <div className="shrink-0 px-4 pb-3">
         <PhrasesWrap phrases={phrases} onPhraseClick={handlePhraseClick} />
       </div>
     </div>

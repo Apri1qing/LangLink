@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { speakText } from '../../hooks/useVoice'
 import { useAppStore } from '../../stores/appStore'
 import { playAudioUrl } from '../../services/audioUnlock'
+import { Play } from 'lucide-react'
 
 interface TranslationSheetProps {
   originalText: string
@@ -14,7 +15,7 @@ interface TranslationSheetProps {
 }
 
 const sheetBottomClass =
-  'pb-[max(1.25rem,env(safe-area-inset-bottom,0px))] pt-2'
+  'pb-4 pt-2'
 
 async function playTranslated(
   audioUrl: string | null | undefined,
@@ -151,7 +152,6 @@ export function TranslationSheet({
   )
 
   if (isTranslating) {
-    const hasPartial = !!(originalText || translatedText)
     return (
       <>
       {backdrop}
@@ -173,37 +173,20 @@ export function TranslationSheet({
           <div className="w-9 h-1 bg-[#C9C4BE] rounded-full" />
         </div>
 
-        <div className="flex flex-col items-center py-4">
-          <div className="w-12 h-12 rounded-full bg-[#F2EDE8] flex items-center justify-center mb-2">
-            <span className="text-xl animate-pulse">⏳</span>
+        <div className="space-y-4 max-h-[45vh] overflow-y-auto pb-1">
+          <div>
+            <p className="text-xs text-[#888888] mb-1 uppercase tracking-wider">{sourceLangName}</p>
+            <p className={`text-base leading-relaxed ${originalText ? 'text-[#2D2D2D]' : 'text-[#9A948E] animate-pulse'}`}>
+              {originalText || '识别中…'}
+            </p>
           </div>
-          <p className="text-base text-[#6B6B6B]">
-            {hasPartial ? '识别中，随句子陆续显示' : '正在连接并识别…'}
-          </p>
+          <div>
+            <p className="text-xs text-[#888888] mb-1 uppercase tracking-wider">{targetLangName}</p>
+            <p className={`text-xl font-semibold leading-snug ${translatedText ? 'text-[#2D2D2D]' : 'text-[#9A948E] animate-pulse'}`}>
+              {translatedText || '翻译中…'}
+            </p>
+          </div>
         </div>
-
-        {hasPartial && (
-          <div className="border-t border-[#EEEAE4] pt-4 pb-2 space-y-3 max-h-[45vh] overflow-y-auto">
-            {originalText ? (
-              <div>
-                <p className="text-xs text-[#888888] mb-1 uppercase tracking-wider flex items-center gap-2">
-                  {sourceLangName}
-                  <span className="text-[10px] font-normal normal-case text-[#D94F00]">更新中</span>
-                </p>
-                <p className="text-base text-[#2D2D2D] leading-relaxed">{originalText}</p>
-              </div>
-            ) : null}
-            {translatedText ? (
-              <div>
-                <p className="text-xs text-[#888888] mb-1 uppercase tracking-wider flex items-center gap-2">
-                  {targetLangName}
-                  <span className="text-[10px] font-normal normal-case text-[#D94F00]">更新中</span>
-                </p>
-                <p className="text-xl font-semibold text-[#2D2D2D] leading-snug">{translatedText}</p>
-              </div>
-            ) : null}
-          </div>
-        )}
       </div>
       </>
     )
@@ -278,19 +261,21 @@ export function TranslationSheet({
       {translatedText && (
         <div className="mb-3">
           <p className="text-xs text-[#888888] mb-1 uppercase tracking-wider">{targetLangName}</p>
-          <p className="text-2xl font-semibold text-[#2D2D2D] leading-snug">{translatedText}</p>
+          <div className="flex items-start gap-3">
+            <p className="flex-1 min-w-0 text-2xl font-semibold text-[#2D2D2D] leading-snug break-words">
+              {translatedText}
+            </p>
+            <button
+              type="button"
+              onClick={handleReplay}
+              aria-label="播放译文"
+              className="mt-0.5 w-10 h-10 shrink-0 rounded-full glass-control-dark text-white flex items-center justify-center active:scale-95 transition-transform"
+            >
+              <Play size={16} fill="currentColor" strokeWidth={0} aria-hidden />
+            </button>
+          </div>
         </div>
       )}
-
-      <div className="flex justify-center mb-4">
-        <button
-          type="button"
-          onClick={handleReplay}
-          className="px-5 py-2 rounded-full bg-[#1A1A1A] text-white text-sm font-medium"
-        >
-          ▶ 播放译文
-        </button>
-      </div>
     </div>
     </>
   )

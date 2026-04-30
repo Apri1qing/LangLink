@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useAppStore } from '../../stores/appStore'
-import { useVoiceTranslateContext } from '../../contexts/VoiceTranslateContext'
+import { useVoiceTranslateContext } from '../../contexts/useVoiceTranslateContext'
 import { imageTranslate } from '../../services/translation'
 import { TopBar } from '../common/TopBar'
 import { Viewfinder } from '../common/Viewfinder'
@@ -26,7 +26,6 @@ export function Home() {
     setShowTranslatedOverlay,
     clearCapturedPhoto,
     setTranslationResult,
-    setIsTranslating,
     clearTranslationResult,
     originalText,
     translatedText,
@@ -47,11 +46,7 @@ export function Home() {
   const isRecording = isLeftRecording || isRightRecording
   const [showCamera, setShowCamera] = useState(false)
   const [isOcrLoading, setIsOcrLoading] = useState(false)
-  const [phrases, setPhrases] = useState<Phrase[]>([])
-
-  useEffect(() => {
-    setPhrases(getPhrases())
-  }, [])
+  const [phrases] = useState<Phrase[]>(() => getPhrases())
 
   const langName = useCallback(
     (code: string) => SUPPORTED_LANGUAGES.find((l) => l.code === code)?.name ?? code,
@@ -72,7 +67,10 @@ export function Home() {
     setIsOcrLoading(true)
     try {
       // sourceLang 传 'auto' 仅为兼容，qwen-vl-ocr advanced_recognition 自动识别多语种
-      const result = await imageTranslate(imageData, 'auto', languagePair.A)
+      const result = await imageTranslate(imageData, 'auto', languagePair.A, {
+        nativeLang: languagePair.A,
+        foreignLang: languagePair.B,
+      })
       if (result.regions && result.regions.length > 0) {
         setOcrRegions(result.regions)
       }
@@ -124,20 +122,18 @@ export function Home() {
     if (isLeftRecording) {
       void stopRecording()
     } else if (!isRecording) {
-      setIsTranslating(false)
       void startLeftRecording()
     }
-  }, [isLeftRecording, isRecording, setIsTranslating, startLeftRecording, stopRecording])
+  }, [isLeftRecording, isRecording, startLeftRecording, stopRecording])
 
   const handleRightToggle = useCallback(() => {
     unlockAudioContext()
     if (isRightRecording) {
       void stopRecording()
     } else if (!isRecording) {
-      setIsTranslating(false)
       void startRightRecording()
     }
-  }, [isRightRecording, isRecording, setIsTranslating, startRightRecording, stopRecording])
+  }, [isRightRecording, isRecording, startRightRecording, stopRecording])
 
   const hasVoiceResult = !!originalText && (translationType === 'voice' || translationType === 'phrase')
   const showSheet = isTranslating || !!translationError || hasVoiceResult
@@ -155,11 +151,11 @@ export function Home() {
       : lastTargetLang ?? languagePair.B
 
   return (
-    <div className="flex flex-col h-full bg-[#F2EDE8]">
+    <div className="flex h-full min-h-0 flex-col bg-[#F2EDE8]">
       <TopBar />
 
-      {/* Viewfinder / PhotoOverlay / CameraCapture — 占据剩余空间 */}
-      <div className="flex-1 min-h-0 px-4 py-2">
+      {/* Viewfinder / PhotoOverlay / CameraCapture */}
+      <div className="min-h-0 flex-1 px-4 py-2">
         <div className="w-full h-full">
           {showCamera ? (
             <CameraCapture onCapture={handleCapturePhoto} onClose={handleCloseCamera} />
@@ -179,7 +175,7 @@ export function Home() {
       </div>
 
       {/* 双 pill（按下说话） */}
-      <div className="py-2">
+      <div className="shrink-0 py-2">
         <DualPill
           leftLabel={leftLabel}
           rightLabel={rightLabel}
@@ -191,7 +187,7 @@ export function Home() {
       </div>
 
       {/* 常用语 */}
-      <div className="px-4 pb-6">
+      <div className="shrink-0 px-4 pb-3">
         <PhrasesWrap phrases={phrases} onPhraseClick={handlePhraseClick} />
       </div>
 

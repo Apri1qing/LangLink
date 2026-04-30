@@ -72,7 +72,12 @@ export interface AppState {
     targetLang?: LanguageCode
   ) => void
   /** 流式识别中间帧：更新文案，保持 isTranslating，清空音频直至最终 setTranslationResult */
-  setVoiceTranslationProgress: (original: string, translated: string) => void
+  setVoiceTranslationProgress: (
+    original: string,
+    translated: string,
+    sourceLang?: LanguageCode,
+    targetLang?: LanguageCode
+  ) => void
   clearTranslationResult: () => void
   setTranslationError: (message: string | null) => void
   setIsTranslating: (value: boolean) => void
@@ -146,14 +151,17 @@ export const useAppStore = create<AppState>()(
       lastTargetLang: targetLang ?? state.lastTargetLang,
     })),
 
-  setVoiceTranslationProgress: (original, translated) =>
-    set({
+  setVoiceTranslationProgress: (original, translated, sourceLang, targetLang) =>
+    set((state) => ({
       originalText: original,
       translatedText: translated,
+      translationType: 'voice',
       translationError: null,
       translationAudioUrl: null,
       isTranslating: true,
-    }),
+      lastSourceLang: sourceLang ?? state.lastSourceLang,
+      lastTargetLang: targetLang ?? state.lastTargetLang,
+    })),
 
   clearTranslationResult: () =>
     set({
